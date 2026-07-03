@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0d1117">
+<title>FightFit — Allenamento</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <h1 id="page-title">FightFit</h1>
+</header>
+
+<main id="main">
+
+  <!-- ============ HOME ============ -->
+  <section id="view-home" class="view active">
+    <div class="card hero" id="suggestion-card">
+      <!-- riempito da JS -->
+    </div>
+    <h2 class="section-title">Questa settimana</h2>
+    <div class="stats-row">
+      <div class="stat card"><span class="stat-num" id="stat-workouts">0</span><span class="stat-label">Allenamenti</span></div>
+      <div class="stat card"><span class="stat-num" id="stat-minutes">0</span><span class="stat-label">Minuti</span></div>
+      <div class="stat card"><span class="stat-num" id="stat-kcal">0</span><span class="stat-label">kcal</span></div>
+    </div>
+    <h2 class="section-title">Piano settimanale consigliato</h2>
+    <div id="weekly-plan" class="plan-list"></div>
+  </section>
+
+  <!-- ============ NUOVO ALLENAMENTO ============ -->
+  <section id="view-new" class="view">
+    <div class="card">
+      <label class="field-label">Tipo di allenamento</label>
+      <div class="type-picker" id="type-picker">
+        <button class="type-btn active" data-type="muaythai">🥊<br>Muay Thai</button>
+        <button class="type-btn" data-type="pesi">🏋️<br>Sala Pesi</button>
+        <button class="type-btn" data-type="corsa">🏃<br>Corsa</button>
+      </div>
+      <label class="field-label" for="w-focus">Focus della seduta</label>
+      <select id="w-focus"></select>
+      <button id="btn-genera" class="btn secondary full">✨ Genera seduta consigliata</button>
+    </div>
+
+    <div class="card phase" data-phase="riscaldamento">
+      <h3>🔥 Riscaldamento</h3>
+      <div class="ex-list" id="list-riscaldamento"></div>
+      <button class="btn tiny add-ex" data-phase="riscaldamento">+ Aggiungi esercizio</button>
+      <label class="field-label">Durata (min)</label>
+      <input type="number" class="phase-min" id="min-riscaldamento" min="0" value="10" inputmode="numeric">
+    </div>
+
+    <div class="card phase" data-phase="allenamento">
+      <h3>💪 Allenamento</h3>
+      <div class="ex-list" id="list-allenamento"></div>
+      <button class="btn tiny add-ex" data-phase="allenamento">+ Aggiungi esercizio</button>
+      <label class="field-label">Durata (min)</label>
+      <input type="number" class="phase-min" id="min-allenamento" min="0" value="40" inputmode="numeric">
+    </div>
+
+    <div class="card phase" data-phase="defaticamento">
+      <h3>🧘 Stretching / Defaticamento</h3>
+      <div class="ex-list" id="list-defaticamento"></div>
+      <button class="btn tiny add-ex" data-phase="defaticamento">+ Aggiungi esercizio</button>
+      <label class="field-label">Durata (min)</label>
+      <input type="number" class="phase-min" id="min-defaticamento" min="0" value="10" inputmode="numeric">
+    </div>
+
+    <div class="card">
+      <label class="field-label" for="w-date">Data</label>
+      <input type="date" id="w-date">
+      <label class="field-label">Quanto è stata dura? (RPE <span id="rpe-val">7</span>/10)</label>
+      <input type="range" id="w-rpe" min="1" max="10" value="7">
+      <div class="rpe-hint" id="rpe-hint">Impegnativo ma gestibile</div>
+      <label class="field-label" for="w-note">Note (opzionale)</label>
+      <textarea id="w-note" rows="2" placeholder="Sensazioni, tecniche provate…"></textarea>
+      <div class="kcal-preview">🔥 Calorie stimate: <strong id="kcal-preview">0</strong> kcal</div>
+      <button id="btn-salva" class="btn primary full">💾 Salva allenamento</button>
+    </div>
+  </section>
+
+  <!-- ============ CRONOMETRO ============ -->
+  <section id="view-timer" class="view">
+    <div class="timer-tabs">
+      <button class="timer-tab active" data-mode="crono">Cronometro</button>
+      <button class="timer-tab" data-mode="round">Round</button>
+      <button class="timer-tab" data-mode="count">Countdown</button>
+    </div>
+
+    <div id="timer-crono" class="timer-panel active card">
+      <div class="time-display" id="crono-display">00:00.0</div>
+      <div class="btn-row">
+        <button id="crono-start" class="btn primary">Avvia</button>
+        <button id="crono-lap" class="btn secondary">Giro</button>
+        <button id="crono-reset" class="btn ghost">Azzera</button>
+      </div>
+      <ol id="crono-laps" class="laps"></ol>
+    </div>
+
+    <div id="timer-round" class="timer-panel card">
+      <div class="round-config">
+        <label>Round <input type="number" id="r-rounds" value="5" min="1" inputmode="numeric"></label>
+        <label>Lavoro (min) <input type="number" id="r-work" value="3" min="0.5" step="0.5" inputmode="decimal"></label>
+        <label>Riposo (min) <input type="number" id="r-rest" value="1" min="0" step="0.5" inputmode="decimal"></label>
+      </div>
+      <div class="time-display" id="round-display">03:00</div>
+      <div class="round-status" id="round-status">Pronto — Round 1 di 5</div>
+      <div class="btn-row">
+        <button id="round-start" class="btn primary">Avvia</button>
+        <button id="round-reset" class="btn ghost">Azzera</button>
+      </div>
+    </div>
+
+    <div id="timer-count" class="timer-panel card">
+      <div class="round-config">
+        <label>Minuti <input type="number" id="c-min" value="5" min="0" inputmode="numeric"></label>
+        <label>Secondi <input type="number" id="c-sec" value="0" min="0" max="59" inputmode="numeric"></label>
+      </div>
+      <div class="time-display" id="count-display">05:00</div>
+      <div class="btn-row">
+        <button id="count-start" class="btn primary">Avvia</button>
+        <button id="count-reset" class="btn ghost">Azzera</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ STORICO ============ -->
+  <section id="view-history" class="view">
+    <h2 class="section-title">Ultime 4 settimane</h2>
+    <div class="card"><div id="chart" class="chart"></div>
+      <div class="chart-legend">
+        <span><i class="dot mt"></i>Muay Thai</span>
+        <span><i class="dot pe"></i>Pesi</span>
+        <span><i class="dot co"></i>Corsa</span>
+      </div>
+    </div>
+    <h2 class="section-title">Allenamenti</h2>
+    <div id="history-list"></div>
+  </section>
+
+  <!-- ============ PROFILO ============ -->
+  <section id="view-profile" class="view">
+    <div class="card">
+      <label class="field-label" for="p-peso">Peso corporeo (kg)</label>
+      <input type="number" id="p-peso" min="30" max="200" inputmode="decimal">
+      <label class="field-label" for="p-obiettivo">Il tuo obiettivo</label>
+      <select id="p-obiettivo">
+        <option value="combattimento">🥊 Migliorare nella Muay Thai</option>
+        <option value="dimagrimento">🔥 Dimagrire / definizione</option>
+        <option value="massa">💪 Massa e forza</option>
+        <option value="resistenza">🏃 Resistenza / cardio</option>
+        <option value="benessere">🌿 Benessere generale</option>
+      </select>
+      <label class="field-label" for="p-giorni">Allenamenti a settimana</label>
+      <select id="p-giorni">
+        <option>2</option><option>3</option><option selected>4</option><option>5</option><option>6</option>
+      </select>
+      <button id="btn-profilo" class="btn primary full">Salva profilo</button>
+    </div>
+    <div class="card">
+      <h3>I tuoi dati</h3>
+      <p class="muted">I dati restano solo su questo dispositivo.</p>
+      <div class="btn-row">
+        <button id="btn-export" class="btn secondary">Esporta backup</button>
+        <button id="btn-import" class="btn secondary">Importa</button>
+      </div>
+      <input type="file" id="import-file" accept=".json" hidden>
+      <button id="btn-reset" class="btn danger full">Cancella tutti i dati</button>
+    </div>
+  </section>
+
+</main>
+
+<nav class="bottombar">
+  <button class="nav-btn active" data-view="home"><span>🏠</span>Home</button>
+  <button class="nav-btn" data-view="new"><span>➕</span>Nuovo</button>
+  <button class="nav-btn" data-view="timer"><span>⏱️</span>Timer</button>
+  <button class="nav-btn" data-view="history"><span>📈</span>Storico</button>
+  <button class="nav-btn" data-view="profile"><span>👤</span>Profilo</button>
+</nav>
+
+<div id="toast" class="toast"></div>
+
+<script src="exercises.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

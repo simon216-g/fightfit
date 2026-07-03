@@ -1,0 +1,16 @@
+{
+  "name": "FightFit — Allenamento",
+  "short_name": "FightFit",
+  "description": "Traccia Muay Thai, sala pesi e corsa. Consigli di allenamento, calorie e cronometro.",
+  "lang": "it",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0d1117",
+  "theme_color": "#0d1117",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}
