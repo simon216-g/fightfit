@@ -202,6 +202,13 @@ input[type="range"] { padding: 0; accent-color: var(--accent); }
 .add-row { display: flex; gap: 8px; flex-wrap: wrap; }
 .add-circuito { background: #2a2340; color: #c4aaff; }
 
+/* ---- Carichi sala pesi ---- */
+.kg-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.kg-nome { flex: 1; font-size: .9rem; color: #cbd5e3; }
+.kg-input { flex: 0 0 92px; text-align: center; padding: 9px 6px; }
+.kg-unit { font-size: .8rem; color: var(--muted); width: 20px; }
+.kg-tag { color: var(--accent2); font-weight: 700; }
+
 /* ---- Blocco circuito ---- */
 .circuito-block {
   background: var(--card2);

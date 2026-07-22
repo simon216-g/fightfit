@@ -245,15 +245,114 @@ const GOAL_LABELS = {
    Motore di suggerimento
    ============================================================ */
 
-/* Adatta i dettagli di un esercizio in base all'ultimo RPE registrato
-   per lo stesso tipo di allenamento:
-   RPE ≤ 6  → progressione (+1 round / +2 rip / +5% durata / suggerisci +carico)
-   RPE 7-8  → mantieni
-   RPE ≥ 9  → scarico (-1 round / -2 rip / -10% durata) */
-function adattaEsercizio(ex, lastRpe) {
+/* Giorni trascorsi da una data ISO a oggi */
+function giorniDa(iso) {
+  const oggi = new Date(new Date().toISOString().slice(0, 10));
+  return Math.max(0, Math.round((oggi - new Date(iso)) / 86400000));
+}
+
+function piuRecenti(workouts) {
+  return [...workouts].sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id);
+}
+
+/* Ultimo carico usato per un esercizio (in kg), cercando in tutto lo storico */
+function ultimoCarico(workouts, nomeEsercizio) {
+  const nome = nomeEsercizio.toLowerCase();
+  for (const w of piuRecenti(workouts)) {
+    const es = w.fasi?.allenamento?.esercizi || [];
+    const hit = es.find((e) => e.nome && e.nome.toLowerCase() === nome && e.kg > 0);
+    if (hit) return hit.kg;
+  }
+  return null;
+}
+
+/* ------------------------------------------------------------
+   Contesto della prossima seduta: incrocia la fatica percepita
+   nell'ultima seduta DELLO STESSO FOCUS con i giorni di recupero
+   realmente trascorsi dall'ultimo allenamento (di qualsiasi tipo).
+   ------------------------------------------------------------ */
+function contestoAllenamento(workouts, type, focus) {
+  const recenti = piuRecenti(workouts);
+  const ultimoFocus = recenti.find((w) => w.type === type && w.focus === focus);
+  const ultimoTipo = recenti.find((w) => w.type === type);
+  const riferimento = ultimoFocus || ultimoTipo || null;
+  const ultimo = recenti[0] || null;
+
+  const rpe = riferimento ? riferimento.rpe : null;
+  const stessoFocus = !!ultimoFocus;
+  const giorni = ultimo ? giorniDa(ultimo.date) : null;
+
+  // punto di partenza: quanto è stata dura l'ultima seduta simile
+  let dir = rpe == null ? 0 : rpe <= 6 ? 1 : rpe >= 9 ? -1 : 0;
+  let motivo = rpe == null ? "nuovo" : dir > 0 ? "progressione" : dir < 0 ? "scarico" : "mantieni";
+
+  // ...corretto da quanto recupero hai avuto davvero
+  if (giorni != null) {
+    if (giorni <= 1 && ultimo.rpe >= 8) {
+      dir = Math.min(dir, -1);
+      motivo = "recupero";
+    } else if (giorni >= 14) {
+      dir = Math.min(dir, -1);
+      motivo = "rientro";
+    } else if (giorni >= 8) {
+      dir = Math.min(dir, 0);
+      motivo = "pausa";
+    } else if (giorni >= 4 && dir === 0 && rpe != null && rpe <= 7) {
+      dir = 1;
+      motivo = "riposato";
+    }
+  }
+
+  return { rpe, dir, motivo, giorni, stessoFocus };
+}
+
+/* Messaggi mostrati in Home sotto il consiglio del giorno */
+function messaggioContesto(c) {
+  switch (c.motivo) {
+    case "progressione":
+      return `📈 L'ultima seduta simile era gestibile (RPE ${c.rpe}): oggi si alza l'asticella.`;
+    case "scarico":
+      return `🛟 L'ultima seduta simile era durissima (RPE ${c.rpe}): oggi si scarica.`;
+    case "recupero":
+      return `😮‍💨 Ti sei allenato ${c.giorni === 0 ? "oggi" : "ieri"} e a fondo: volume ridotto.`;
+    case "rientro":
+      return `🌱 Sono passati ${c.giorni} giorni: si rientra in gradualità.`;
+    case "pausa":
+      return `⏸️ Dopo ${c.giorni} giorni di stop, oggi si mantiene senza forzare.`;
+    case "riposato":
+      return `⚡ ${c.giorni} giorni di recupero alle spalle: si può spingere.`;
+    case "mantieni":
+      return `⚖️ Ritmo giusto: manteniamo questi volumi.`;
+    default:
+      return null;
+  }
+}
+
+/* Adatta i dettagli di un esercizio alla direzione decisa dal contesto:
+   +1 → più volume · 0 → invariato · −1 → scarico
+   Sui pesi usa il carico realmente registrato l'ultima volta, se c'è. */
+function adattaEsercizio(ex, ctx, workouts) {
   let det = ex.det;
-  let nota = "";
-  const dir = lastRpe == null ? 0 : lastRpe <= 6 ? 1 : lastRpe >= 9 ? -1 : 0;
+  const dir = ctx.dir;
+
+  if (ex.prog === "carico") {
+    const kg = ultimoCarico(workouts || [], ex.nome);
+    if (kg) {
+      const nuovo = dir > 0 ? kg + 2.5 : dir < 0 ? kg * 0.9 : kg;
+      const arrot = Math.round(nuovo * 2) / 2;
+      return {
+        nome: ex.nome,
+        det: `${det} — ${formattaKg(arrot)} kg`,
+        kgSuggerito: arrot,
+      };
+    }
+    if (dir === 0) return { nome: ex.nome, det };
+    return {
+      nome: ex.nome,
+      det: det + (dir > 0 ? " (aumenta il carico di 2,5 kg)" : " (riduci il carico del 10%)"),
+    };
+  }
+
   if (dir === 0) return { nome: ex.nome, det };
 
   const bump = (str, re, delta, min) =>
@@ -269,38 +368,30 @@ function adattaEsercizio(ex, lastRpe) {
     case "rip":
       det = bump(det, /[×x]\s*(\d+)/, dir * 2, 4);
       break;
-    case "carico":
-      nota = dir > 0 ? " (aumenta il carico di 2,5 kg)" : " (riduci il carico del 10%)";
-      break;
     case "durata":
       det = bump(det, /(\d+)\s*min/, dir * 5, 10);
       break;
   }
-  return { nome: ex.nome, det: det + nota };
+  return { nome: ex.nome, det };
 }
 
-/* Ultimo RPE per un tipo di allenamento */
-function lastRpeFor(workouts, type) {
-  const w = [...workouts]
-    .filter((x) => x.type === type)
-    .sort((a, b) => b.date.localeCompare(a.date))[0];
-  return w ? w.rpe : null;
+function formattaKg(kg) {
+  return String(kg).replace(".", ",");
 }
 
 /* Genera una seduta completa (3 fasi) per tipo+focus, adattata ai progressi */
 function generaSeduta(type, focus, workouts) {
   const sess = SESSIONS[type][focus];
-  const rpe = lastRpeFor(workouts, type);
+  const ctx = contestoAllenamento(workouts, type, focus);
   return {
     type,
     focus,
     label: sess.label,
     riscaldamento: WARMUPS[type].map((e) => ({ nome: e.nome, det: e.det })),
-    allenamento: sess.esercizi.map((e) => adattaEsercizio(e, rpe)),
+    allenamento: sess.esercizi.map((e) => adattaEsercizio(e, ctx, workouts)),
     defaticamento: COOLDOWNS[type].map((e) => ({ nome: e.nome, det: e.det })),
     durata: sess.durata,
-    progressione:
-      rpe == null ? null : rpe <= 6 ? "up" : rpe >= 9 ? "down" : "keep",
+    contesto: ctx,
   };
 }
 

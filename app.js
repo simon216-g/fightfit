@@ -79,16 +79,12 @@ function renderHome() {
   // Suggerimento del giorno
   const sug = prossimoConsigliato(profile, workouts);
   const info = TYPE_INFO[sug.type];
-  const progrMsg = {
-    up: "📈 L'ultima seduta è stata gestibile: oggi si alza l'asticella!",
-    down: "🛟 L'ultima seduta è stata molto dura: oggi si scarica un po'.",
-    keep: "⚖️ Ritmo giusto: manteniamo questi volumi.",
-  };
+  const msg = messaggioContesto(sug.contesto);
   $("#suggestion-card").innerHTML = `
     <div class="hero-tag">Allenamento consigliato oggi</div>
     <h2>${info.emoji} ${info.nome} — ${sug.label}</h2>
     <div class="hero-sub">Obiettivo: ${GOAL_LABELS[profile.obiettivo]} · ~${sug.durata + 20} min totali${
-      sug.progressione ? "<br>" + progrMsg[sug.progressione] : ""
+      msg ? "<br>" + msg : ""
     }</div>
     <ul>${sug.allenamento.slice(0, 4).map((e) => `<li>${e.nome} — ${e.det}</li>`).join("")}
     ${sug.allenamento.length > 4 ? "<li>…e altro</li>" : ""}</ul>
@@ -131,6 +127,7 @@ $$(".type-btn").forEach((btn) =>
     currentType = btn.dataset.type;
     popolaFocus();
     aggiornaKcal();
+    renderCarichi();
   })
 );
 
@@ -148,16 +145,63 @@ function exRow(phase, nome = "", det = "") {
     <input class="ex-name" placeholder="Esercizio" value="${escapeAttr(nome)}">
     <input class="ex-det" placeholder="Serie×rip / durata" value="${escapeAttr(det)}">
     <button class="ex-del" title="Rimuovi">✕</button>`;
-  row.querySelector(".ex-del").addEventListener("click", () => row.remove());
+  row.querySelector(".ex-del").addEventListener("click", () => {
+    row.remove();
+    renderCarichi();
+  });
   $("#list-" + phase).appendChild(row);
 }
+
+/* ------------------ Carichi (solo sala pesi) ------------------
+   La lista si compila a fine allenamento: il campo resta vuoto e
+   mostra come suggerimento il carico consigliato o l'ultimo usato. */
+let kgSuggeriti = {};
+
+function renderCarichi() {
+  const card = $("#carichi-card");
+  const esercizi =
+    currentType === "pesi"
+      ? leggiFase("allenamento").filter((e) => e.tipo !== "circuito")
+      : [];
+
+  if (!esercizi.length) {
+    card.hidden = true;
+    $("#carichi-list").innerHTML = "";
+    return;
+  }
+
+  // conserva i valori già digitati
+  const gia = {};
+  $$("#carichi-list .kg-row").forEach((r) => {
+    gia[r.dataset.nome] = r.querySelector(".kg-input").value;
+  });
+
+  card.hidden = false;
+  $("#carichi-list").innerHTML = esercizi
+    .map((e) => {
+      const key = e.nome.toLowerCase();
+      const sugg = kgSuggeriti[key] || ultimoCarico(state.workouts, e.nome);
+      return `<div class="kg-row" data-nome="${escapeAttr(key)}">
+        <span class="kg-nome">${escapeAttr(e.nome)}</span>
+        <input type="number" class="kg-input" min="0" step="0.5" inputmode="decimal"
+          placeholder="${sugg ? formattaKg(sugg) : "—"}" value="${escapeAttr(gia[key] || "")}">
+        <span class="kg-unit">kg</span>
+      </div>`;
+    })
+    .join("");
+}
+
+$("#list-allenamento").addEventListener("input", renderCarichi);
 
 function escapeAttr(s) {
   return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 }
 
 $$(".add-ex").forEach((btn) =>
-  btn.addEventListener("click", () => exRow(btn.dataset.phase))
+  btn.addEventListener("click", () => {
+    exRow(btn.dataset.phase);
+    renderCarichi();
+  })
 );
 
 /* ------------------ Circuiti ------------------
@@ -323,6 +367,14 @@ function precompilaForm(seduta) {
     seduta[phase].forEach((e) => exRow(phase, e.nome, e.det));
   });
   $("#min-allenamento").value = seduta.durata;
+
+  // carichi consigliati: restano solo come suggerimento nei campi vuoti
+  kgSuggeriti = {};
+  seduta.allenamento.forEach((e) => {
+    if (e.kgSuggerito) kgSuggeriti[e.nome.toLowerCase()] = e.kgSuggerito;
+  });
+  $("#carichi-list").innerHTML = "";
+  renderCarichi();
   aggiornaKcal();
 }
 
@@ -370,6 +422,19 @@ $("#btn-salva").addEventListener("click", () => {
     return;
   }
 
+  // carichi digitati a fine allenamento
+  const carichi = {};
+  $$("#carichi-list .kg-row").forEach((r) => {
+    const kg = +r.querySelector(".kg-input").value;
+    if (kg > 0) carichi[r.dataset.nome] = kg;
+  });
+  allenamento.forEach((e) => {
+    if (e.tipo !== "circuito") {
+      const kg = carichi[e.nome.toLowerCase()];
+      if (kg) e.kg = kg;
+    }
+  });
+
   const w = {
     id: Date.now(),
     date: $("#w-date").value || new Date().toISOString().slice(0, 10),
@@ -403,6 +468,9 @@ $("#btn-salva").addEventListener("click", () => {
 
 function resetForm() {
   circuitiMinLast = 0;
+  kgSuggeriti = {};
+  $("#carichi-list").innerHTML = "";
+  $("#carichi-card").hidden = true;
   ["riscaldamento", "allenamento", "defaticamento"].forEach(
     (p) => ($("#list-" + p).innerHTML = "")
   );
@@ -819,7 +887,9 @@ function renderHistory() {
       const focusLabel = SESSIONS[w.type][w.focus] ? SESSIONS[w.type][w.focus].label : (w.focus || "");
       const voce = (e) => {
         if (e.tipo !== "circuito")
-          return `<li>• ${escapeAttr(e.nome)}${e.det ? " — " + escapeAttr(e.det) : ""}</li>`;
+          return `<li>• ${escapeAttr(e.nome)}${e.det ? " — " + escapeAttr(e.det) : ""}${
+            e.kg ? ` <strong class="kg-tag">${formattaKg(e.kg)} kg</strong>` : ""
+          }</li>`;
         const sub = e.esercizi
           .map(
             (s) =>
