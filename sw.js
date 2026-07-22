@@ -1,5 +1,5 @@
 /* Service worker: rende l'app utilizzabile offline */
-const CACHE = "fightfit-v1";
+const CACHE = "fightfit-v2";
 const ASSETS = [
   "./",
   "./index.html",

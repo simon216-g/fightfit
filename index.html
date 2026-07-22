@@ -58,7 +58,10 @@
     <div class="card phase" data-phase="allenamento">
       <h3>💪 Allenamento</h3>
       <div class="ex-list" id="list-allenamento"></div>
-      <button class="btn tiny add-ex" data-phase="allenamento">+ Aggiungi esercizio</button>
+      <div class="add-row">
+        <button class="btn tiny add-ex" data-phase="allenamento">+ Aggiungi esercizio</button>
+        <button class="btn tiny add-circuito" id="btn-add-circuito">+ Aggiungi circuito</button>
+      </div>
       <label class="field-label">Durata (min)</label>
       <input type="number" class="phase-min" id="min-allenamento" min="0" value="40" inputmode="numeric">
     </div>
@@ -104,9 +107,21 @@
 
     <div id="timer-round" class="timer-panel card">
       <div class="round-config">
-        <label>Round <input type="number" id="r-rounds" value="5" min="1" inputmode="numeric"></label>
-        <label>Lavoro (min) <input type="number" id="r-work" value="3" min="0.5" step="0.5" inputmode="decimal"></label>
-        <label>Riposo (min) <input type="number" id="r-rest" value="1" min="0" step="0.5" inputmode="decimal"></label>
+        <label>Round
+          <input type="number" id="r-rounds" value="5" min="1" inputmode="numeric">
+        </label>
+        <label>Lavoro
+          <span class="dual">
+            <input type="number" id="r-work" value="3" min="1" inputmode="numeric">
+            <select id="r-work-unit"><option value="min">min</option><option value="sec">sec</option></select>
+          </span>
+        </label>
+        <label>Riposo
+          <span class="dual">
+            <input type="number" id="r-rest" value="1" min="0" inputmode="numeric">
+            <select id="r-rest-unit"><option value="min">min</option><option value="sec">sec</option></select>
+          </span>
+        </label>
       </div>
       <div class="time-display" id="round-display">03:00</div>
       <div class="round-status" id="round-status">Pronto — Round 1 di 5</div>
@@ -148,6 +163,21 @@
     <div class="card">
       <label class="field-label" for="p-peso">Peso corporeo (kg)</label>
       <input type="number" id="p-peso" min="30" max="200" inputmode="decimal">
+      <div class="field-pair">
+        <div>
+          <label class="field-label" for="p-altezza">Altezza (cm)</label>
+          <input type="number" id="p-altezza" min="120" max="230" inputmode="numeric">
+        </div>
+        <div>
+          <label class="field-label" for="p-eta">Età</label>
+          <input type="number" id="p-eta" min="10" max="99" inputmode="numeric">
+        </div>
+      </div>
+      <label class="field-label" for="p-sesso">Sesso</label>
+      <select id="p-sesso">
+        <option value="M">Uomo</option>
+        <option value="F">Donna</option>
+      </select>
       <label class="field-label" for="p-obiettivo">Il tuo obiettivo</label>
       <select id="p-obiettivo">
         <option value="combattimento">🥊 Migliorare nella Muay Thai</option>
@@ -183,6 +213,28 @@
   <button class="nav-btn" data-view="history"><span>📈</span>Storico</button>
   <button class="nav-btn" data-view="profile"><span>👤</span>Profilo</button>
 </nav>
+
+<!-- ============ SCHERMATA CIRCUITO A TUTTO SCHERMO ============ -->
+<div id="circuit-run" class="circuit-run" hidden>
+  <div class="cr-top">
+    <span id="cr-title">Circuito</span>
+    <button id="cr-close" class="cr-close" aria-label="Chiudi">✕</button>
+  </div>
+  <div class="cr-body">
+    <div class="cr-giro" id="cr-giro">Giro 1 di 1</div>
+    <div class="cr-phase" id="cr-phase">Esercizio</div>
+    <div class="cr-name" id="cr-name">—</div>
+    <div class="cr-time" id="cr-time">00:00</div>
+    <div class="cr-next" id="cr-next"></div>
+  </div>
+  <div class="cr-bottom">
+    <div class="cr-progress"><div id="cr-bar"></div></div>
+    <div class="cr-actions">
+      <button id="cr-toggle" class="btn primary">Pausa</button>
+      <button id="cr-skip" class="btn secondary">Avanti ›</button>
+    </div>
+  </div>
+</div>
 
 <div id="toast" class="toast"></div>
 

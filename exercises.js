@@ -11,16 +11,16 @@ const TYPE_INFO = {
 const MET_RISCALDAMENTO = 4.0;
 const MET_DEFATICAMENTO = 2.5;
 
-/* MET corsa in base al ritmo (min/km) */
-function metCorsa(minPerKm) {
-  if (!minPerKm || minPerKm <= 0) return 9.0;
-  if (minPerKm <= 3.8) return 14.5;
-  if (minPerKm <= 4.5) return 12.5;
-  if (minPerKm <= 5.5) return 10.5;
-  if (minPerKm <= 6.5) return 9.0;
-  if (minPerKm <= 7.5) return 8.0;
-  return 6.5;
-}
+/* MET specifici per focus: una seduta tecnica e una di condizionamento
+   non consumano allo stesso modo (valori dal Compendium of Physical Activities) */
+const FOCUS_MET = {
+  muaythai: { tecnica: 8.5, sacco: 10.5, condizionamento: 11.0 },
+  pesi: { spinta: 5.5, trazione: 5.5, gambe: 6.0, esplosivita: 6.5, circuito: 8.0 },
+  corsa: { lento: 8.3, lungo: 9.0, intervalli: 11.5, ripetute: 12.0 },
+};
+
+/* Focus ad alta intensità: generano consumo extra post-allenamento (EPOC) */
+const FOCUS_INTENSI = ["intervalli", "ripetute", "condizionamento", "circuito", "esplosivita"];
 
 /* ------------------ Riscaldamenti ------------------ */
 const WARMUPS = {
@@ -332,13 +332,43 @@ function prossimoConsigliato(profile, workouts) {
   return generaSeduta(slot.type, slot.focus, workouts);
 }
 
-/* ------------------ Calorie ------------------
-   kcal = MET × peso(kg) × ore */
-function stimaCalorie(type, minRisc, minAll, minDef, peso) {
-  const met = TYPE_INFO[type].met;
+/* ============================================================
+   Calorie
+   ------------------------------------------------------------
+   Metabolismo basale individuale (Mifflin-St Jeor) come base,
+   MET specifico del focus scalato sull'RPE realmente percepito,
+   consumo NETTO (tolto il basale) e supplemento EPOC.
+   ============================================================ */
+
+/* kcal bruciate a riposo in un minuto, specifiche della persona */
+function rmrPerMinuto(p) {
+  const peso = p.peso || 70;
+  const altezza = p.altezza || 175;
+  const eta = p.eta || 25;
+  const base = 10 * peso + 6.25 * altezza - 5 * eta + (p.sesso === "F" ? -161 : 5);
+  return base / 1440;
+}
+
+/* MET della seduta corretto con la fatica percepita:
+   ±7,5% per ogni punto RPE sopra/sotto il riferimento 7 */
+function metEffettivo(type, focus, rpe) {
+  const tab = FOCUS_MET[type] || {};
+  const base = tab[focus] || TYPE_INFO[type].met;
+  const fattore = Math.min(1.35, Math.max(0.6, 1 + ((rpe || 7) - 7) * 0.075));
+  return base * fattore;
+}
+
+function stimaCalorie(type, focus, rpe, minRisc, minAll, minDef, profile) {
+  const rmr = rmrPerMinuto(profile);
+  const met = metEffettivo(type, focus, rpe);
+  // consumo netto: (MET - 1) perché 1 MET è quello che si spende comunque a riposo
   const kcal =
-    MET_RISCALDAMENTO * peso * (minRisc / 60) +
-    met * peso * (minAll / 60) +
-    MET_DEFATICAMENTO * peso * (minDef / 60);
-  return Math.round(kcal);
+    (MET_RISCALDAMENTO - 1) * rmr * (minRisc || 0) +
+    (met - 1) * rmr * (minAll || 0) +
+    (MET_DEFATICAMENTO - 1) * rmr * (minDef || 0);
+
+  const intensa = (rpe || 7) >= 8 || FOCUS_INTENSI.includes(focus);
+  const epoc = intensa ? 1 + Math.min(0.09, 0.02 + Math.max(0, (rpe || 7) - 6) * 0.02) : 1;
+
+  return Math.max(0, Math.round(kcal * epoc));
 }

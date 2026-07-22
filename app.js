@@ -8,17 +8,27 @@ const $$ = (sel) => [...document.querySelectorAll(sel)];
 /* ------------------ Stato e persistenza ------------------ */
 const STORAGE_KEY = "fightfit_v1";
 
+const PROFILO_DEFAULT = {
+  peso: 70,
+  altezza: 175,
+  eta: 25,
+  sesso: "M",
+  obiettivo: "combattimento",
+  giorni: 4,
+};
+
 let state = load();
 
 function load() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const s = JSON.parse(raw);
+      s.profile = Object.assign({}, PROFILO_DEFAULT, s.profile);
+      return s;
+    }
   } catch (e) { /* dati corrotti: riparti pulito */ }
-  return {
-    profile: { peso: 70, obiettivo: "combattimento", giorni: 4 },
-    workouts: [],
-  };
+  return { profile: Object.assign({}, PROFILO_DEFAULT), workouts: [] };
 }
 
 function save() {
@@ -150,6 +160,148 @@ $$(".add-ex").forEach((btn) =>
   btn.addEventListener("click", () => exRow(btn.dataset.phase))
 );
 
+/* ------------------ Circuiti ------------------
+   Un circuito è un blocco unico che contiene più sotto-esercizi,
+   ognuno a tempo (sec/min) o a ripetizioni. */
+
+const UNIT_OPTS = `<option value="sec">sec</option><option value="min">min</option><option value="rip">rip</option>`;
+
+function circuitoBlock(dati) {
+  const el = document.createElement("div");
+  el.className = "circuito-block";
+  el.innerHTML = `
+    <div class="ci-head">
+      <span class="ci-tag">🔁 Circuito</span>
+      <input class="ci-nome" placeholder="Nome del circuito" value="${escapeAttr(dati?.nome || "")}">
+      <button class="ci-del" title="Rimuovi circuito">✕</button>
+    </div>
+    <div class="ci-config">
+      <label>Giri <input type="number" class="ci-giri" min="1" value="${dati?.giri || 3}" inputmode="numeric"></label>
+      <label>Rec. esercizi <span class="dual">
+        <input type="number" class="ci-rec-es" min="0" value="${dati ? dati.recEsVal : 15}" inputmode="numeric">
+        <select class="ci-rec-es-unit"><option value="sec">sec</option><option value="min">min</option></select></span></label>
+      <label>Rec. giri <span class="dual">
+        <input type="number" class="ci-rec-giri" min="0" value="${dati ? dati.recGiriVal : 60}" inputmode="numeric">
+        <select class="ci-rec-giri-unit"><option value="sec">sec</option><option value="min">min</option></select></span></label>
+    </div>
+    <div class="ci-list"></div>
+    <button class="btn tiny ci-add">+ Aggiungi esercizio al circuito</button>
+    <button class="btn ci-start full" hidden>▶️ Avvia circuito</button>
+  `;
+
+  el.querySelector(".ci-del").addEventListener("click", () => {
+    el.remove();
+    aggiornaDurataCircuiti();
+  });
+  el.querySelector(".ci-add").addEventListener("click", () => ciExRow(el));
+  el.querySelector(".ci-start").addEventListener("click", () => avviaCircuito(leggiCircuito(el)));
+  el.addEventListener("input", () => {
+    refreshCircuito(el);
+    aggiornaDurataCircuiti();
+  });
+
+  const esercizi = dati?.esercizi?.length ? dati.esercizi : [{}, {}];
+  esercizi.forEach((e) => ciExRow(el, e));
+  refreshCircuito(el);
+  return el;
+}
+
+function ciExRow(blockEl, dati) {
+  const row = document.createElement("div");
+  row.className = "ci-ex";
+  row.innerHTML = `
+    <input class="ci-ex-nome" placeholder="Esercizio" value="${escapeAttr(dati?.nome || "")}">
+    <input type="number" class="ci-ex-val" min="0" placeholder="0" value="${dati?.val ?? ""}" inputmode="numeric">
+    <select class="ci-ex-unit">${UNIT_OPTS}</select>
+    <button class="ci-ex-del" title="Rimuovi">✕</button>`;
+  row.querySelector(".ci-ex-unit").value = dati?.unit || "sec";
+  row.querySelector(".ci-ex-del").addEventListener("click", () => {
+    row.remove();
+    refreshCircuito(blockEl);
+    aggiornaDurataCircuiti();
+  });
+  blockEl.querySelector(".ci-list").appendChild(row);
+  refreshCircuito(blockEl);
+}
+
+/* Il tasto "Avvia circuito" compare solo se c'è almeno un esercizio a tempo */
+function refreshCircuito(el) {
+  const c = leggiCircuito(el);
+  const aTempo = c.esercizi.some((e) => e.unit !== "rip" && e.val > 0);
+  el.querySelector(".ci-start").hidden = !aTempo;
+}
+
+function durataSec(val, unit) {
+  return unit === "min" ? (val || 0) * 60 : val || 0;
+}
+
+function leggiCircuito(el) {
+  const num = (sel) => +el.querySelector(sel).value || 0;
+  return {
+    tipo: "circuito",
+    nome: el.querySelector(".ci-nome").value.trim() || "Circuito",
+    giri: Math.max(1, num(".ci-giri")),
+    recEsVal: num(".ci-rec-es"),
+    recEsUnit: el.querySelector(".ci-rec-es-unit").value,
+    recGiriVal: num(".ci-rec-giri"),
+    recGiriUnit: el.querySelector(".ci-rec-giri-unit").value,
+    recEs: durataSec(num(".ci-rec-es"), el.querySelector(".ci-rec-es-unit").value),
+    recGiri: durataSec(num(".ci-rec-giri"), el.querySelector(".ci-rec-giri-unit").value),
+    esercizi: [...el.querySelectorAll(".ci-ex")]
+      .map((r) => ({
+        nome: r.querySelector(".ci-ex-nome").value.trim(),
+        val: +r.querySelector(".ci-ex-val").value || 0,
+        unit: r.querySelector(".ci-ex-unit").value,
+      }))
+      .filter((e) => e.nome),
+  };
+}
+
+/* Minuti stimati del circuito: gli esercizi a ripetizioni valgono 45 sec */
+function stimaMinutiCircuito(c) {
+  const lavoro = c.esercizi.reduce(
+    (s, e) => s + (e.unit === "rip" ? 45 : durataSec(e.val, e.unit)),
+    0
+  );
+  const perGiro = lavoro + c.recEs * Math.max(0, c.esercizi.length - 1);
+  const tot = perGiro * c.giri + c.recGiri * Math.max(0, c.giri - 1);
+  return Math.round(tot / 60);
+}
+
+/* Tiene aggiornati i minuti della fase allenamento sommando/sottraendo
+   solo la differenza, così le modifiche manuali dell'utente restano */
+let circuitiMinLast = 0;
+
+function aggiornaDurataCircuiti() {
+  const tot = leggiFase("allenamento")
+    .filter((x) => x.tipo === "circuito")
+    .reduce((s, c) => s + stimaMinutiCircuito(c), 0);
+  const campo = $("#min-allenamento");
+  campo.value = Math.max(0, (+campo.value || 0) - circuitiMinLast + tot);
+  circuitiMinLast = tot;
+  aggiornaKcal();
+}
+
+$("#btn-add-circuito").addEventListener("click", () => {
+  $("#list-allenamento").appendChild(circuitoBlock());
+  aggiornaDurataCircuiti();
+});
+
+/* Legge una fase mantenendo l'ordine tra esercizi singoli e circuiti */
+function leggiFase(phase) {
+  const out = [];
+  [...$("#list-" + phase).children].forEach((el) => {
+    if (el.classList.contains("circuito-block")) {
+      const c = leggiCircuito(el);
+      if (c.esercizi.length) out.push(c);
+    } else if (el.classList.contains("ex-row")) {
+      const nome = el.querySelector(".ex-name").value.trim();
+      if (nome) out.push({ nome, det: el.querySelector(".ex-det").value.trim() });
+    }
+  });
+  return out;
+}
+
 $("#btn-genera").addEventListener("click", () => {
   const seduta = generaSeduta(currentType, $("#w-focus").value, state.workouts);
   precompilaForm(seduta);
@@ -165,6 +317,7 @@ function precompilaForm(seduta) {
   popolaFocus();
   $("#w-focus").value = seduta.focus;
   // fasi
+  circuitiMinLast = 0;
   ["riscaldamento", "allenamento", "defaticamento"].forEach((phase) => {
     $("#list-" + phase).innerHTML = "";
     seduta[phase].forEach((e) => exRow(phase, e.nome, e.det));
@@ -182,33 +335,30 @@ const RPE_HINTS = {
 $("#w-rpe").addEventListener("input", () => {
   $("#rpe-val").textContent = $("#w-rpe").value;
   $("#rpe-hint").textContent = RPE_HINTS[$("#w-rpe").value];
+  aggiornaKcal();
 });
 
 /* Calorie in tempo reale */
 ["min-riscaldamento", "min-allenamento", "min-defaticamento"].forEach((id) =>
   $("#" + id).addEventListener("input", aggiornaKcal)
 );
+$("#w-focus").addEventListener("change", aggiornaKcal);
 
 function aggiornaKcal() {
-  const kcal = stimaCalorie(
+  $("#kcal-preview").textContent = stimaCalorie(
     currentType,
+    $("#w-focus").value,
+    +$("#w-rpe").value,
     +$("#min-riscaldamento").value || 0,
     +$("#min-allenamento").value || 0,
     +$("#min-defaticamento").value || 0,
-    state.profile.peso
+    state.profile
   );
-  $("#kcal-preview").textContent = kcal;
 }
 
 /* Salvataggio */
 $("#btn-salva").addEventListener("click", () => {
-  const leggi = (phase) =>
-    $$("#list-" + phase + " .ex-row")
-      .map((r) => ({
-        nome: r.querySelector(".ex-name").value.trim(),
-        det: r.querySelector(".ex-det").value.trim(),
-      }))
-      .filter((e) => e.nome);
+  const leggi = leggiFase;
 
   const riscMin = +$("#min-riscaldamento").value || 0;
   const allMin = +$("#min-allenamento").value || 0;
@@ -233,7 +383,15 @@ $("#btn-salva").addEventListener("click", () => {
     durataTotale: riscMin + allMin + defMin,
     rpe: +$("#w-rpe").value,
     note: $("#w-note").value.trim(),
-    kcal: stimaCalorie(currentType, riscMin, allMin, defMin, state.profile.peso),
+    kcal: stimaCalorie(
+      currentType,
+      $("#w-focus").value,
+      +$("#w-rpe").value,
+      riscMin,
+      allMin,
+      defMin,
+      state.profile
+    ),
   };
 
   state.workouts.push(w);
@@ -244,6 +402,7 @@ $("#btn-salva").addEventListener("click", () => {
 });
 
 function resetForm() {
+  circuitiMinLast = 0;
   ["riscaldamento", "allenamento", "defaticamento"].forEach(
     (p) => ($("#list-" + p).innerHTML = "")
   );
@@ -338,10 +497,12 @@ $("#crono-reset").addEventListener("click", () => {
 let rd = { running: false, interval: null, phase: "work", round: 1, remaining: 0 };
 
 function roundConfig() {
+  const ms = (id) =>
+    durataSec(+$("#" + id).value || 0, $("#" + id + "-unit").value) * 1000;
   return {
     rounds: Math.max(1, +$("#r-rounds").value || 5),
-    work: Math.max(0.1, +$("#r-work").value || 3) * 60000,
-    rest: Math.max(0, +$("#r-rest").value || 1) * 60000,
+    work: Math.max(1000, ms("r-work")),
+    rest: Math.max(0, ms("r-rest")),
   };
 }
 
@@ -421,7 +582,7 @@ $("#round-reset").addEventListener("click", () => {
   roundRefresh();
 });
 
-["r-rounds", "r-work", "r-rest"].forEach((id) =>
+["r-rounds", "r-work", "r-rest", "r-work-unit", "r-rest-unit"].forEach((id) =>
   $("#" + id).addEventListener("input", () => {
     if (!rd.running) {
       rd.remaining = roundConfig().work;
@@ -482,6 +643,142 @@ $("#count-reset").addEventListener("click", () => {
 );
 
 /* ============================================================
+   CIRCUITO AUTOMATICO (schermo intero)
+   ============================================================ */
+let cir = null; // { coda, i, remaining, running, interval, wakeLock, nome }
+
+/* Costruisce la sequenza completa: esercizi, recuperi e giri */
+function codaCircuito(c) {
+  const coda = [];
+  for (let g = 1; g <= c.giri; g++) {
+    c.esercizi.forEach((e, i) => {
+      coda.push({
+        kind: e.unit === "rip" ? "reps" : "work",
+        nome: e.nome,
+        sec: e.unit === "rip" ? 0 : durataSec(e.val, e.unit),
+        reps: e.unit === "rip" ? e.val : 0,
+        giro: g,
+      });
+      if (i < c.esercizi.length - 1 && c.recEs > 0)
+        coda.push({ kind: "rest", nome: "Recupero", sec: c.recEs, giro: g });
+    });
+    if (g < c.giri && c.recGiri > 0)
+      coda.push({ kind: "rest", nome: "Recupero tra i giri", sec: c.recGiri, giro: g });
+  }
+  return coda;
+}
+
+async function tieniSchermoAcceso() {
+  try {
+    if ("wakeLock" in navigator) cir.wakeLock = await navigator.wakeLock.request("screen");
+  } catch (e) { /* non supportato: pazienza */ }
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (cir && cir.running && document.visibilityState === "visible") tieniSchermoAcceso();
+});
+
+function avviaCircuito(c) {
+  const coda = codaCircuito(c);
+  if (!coda.length) return;
+  cir = { coda, i: 0, remaining: 0, running: true, interval: null, wakeLock: null, giri: c.giri, nome: c.nome };
+  $("#cr-title").textContent = c.nome;
+  $("#circuit-run").hidden = false;
+  document.body.classList.add("no-scroll");
+  tieniSchermoAcceso();
+  caricaSegmento(0);
+  cir.interval = setInterval(tickCircuito, 200);
+  beep(880, 250, 2);
+}
+
+function caricaSegmento(i) {
+  const s = cir.coda[i];
+  cir.i = i;
+  cir.remaining = s.sec * 1000;
+  const succ = cir.coda[i + 1];
+
+  $("#cr-giro").textContent = `Giro ${s.giro} di ${cir.giri}`;
+  $("#cr-name").textContent = s.nome;
+  $("#cr-next").textContent = succ ? "Prossimo: " + succ.nome : "Ultimo esercizio 💪";
+  $("#circuit-run").dataset.kind = s.kind;
+
+  if (s.kind === "reps") {
+    $("#cr-phase").textContent = "A ripetizioni";
+    $("#cr-time").textContent = s.reps ? s.reps + " rip" : "—";
+    $("#cr-toggle").hidden = true;
+    $("#cr-skip").textContent = "Fatto ✓";
+    $("#cr-skip").className = "btn primary";
+  } else {
+    $("#cr-phase").textContent = s.kind === "rest" ? "Recupero" : "Esercizio";
+    $("#cr-toggle").hidden = false;
+    $("#cr-toggle").textContent = cir.running ? "Pausa" : "Riprendi";
+    $("#cr-skip").textContent = "Avanti ›";
+    $("#cr-skip").className = "btn secondary";
+  }
+  refreshCircuitoUI();
+}
+
+function refreshCircuitoUI() {
+  const s = cir.coda[cir.i];
+  if (s.kind !== "reps") $("#cr-time").textContent = fmt(Math.max(0, cir.remaining));
+  $("#cr-bar").style.width = ((cir.i / cir.coda.length) * 100).toFixed(1) + "%";
+}
+
+function tickCircuito() {
+  if (!cir.running) return;
+  const s = cir.coda[cir.i];
+  if (s.kind === "reps") return; // attende la conferma dell'utente
+
+  cir.remaining -= 200;
+  if (cir.remaining <= 0) return prossimoSegmento();
+  if (cir.remaining <= 3000 && cir.remaining % 1000 < 200) beep(660, 90, 1);
+  refreshCircuitoUI();
+}
+
+function prossimoSegmento() {
+  if (cir.i + 1 >= cir.coda.length) return fineCircuito();
+  const succ = cir.coda[cir.i + 1];
+  beep(succ.kind === "rest" ? 440 : 880, 250, succ.kind === "rest" ? 1 : 2);
+  caricaSegmento(cir.i + 1);
+}
+
+function fineCircuito() {
+  clearInterval(cir.interval);
+  cir.running = false;
+  beep(880, 600, 3);
+  $("#cr-phase").textContent = "🏁 Completato";
+  $("#cr-name").textContent = "Ottimo lavoro!";
+  $("#cr-time").textContent = "✓";
+  $("#cr-next").textContent = "";
+  $("#cr-bar").style.width = "100%";
+  $("#cr-toggle").hidden = true;
+  $("#cr-skip").textContent = "Chiudi";
+  $("#cr-skip").className = "btn primary";
+}
+
+function chiudiCircuito() {
+  if (!cir) return;
+  clearInterval(cir.interval);
+  if (cir.wakeLock) { try { cir.wakeLock.release(); } catch (e) {} }
+  cir = null;
+  $("#circuit-run").hidden = true;
+  document.body.classList.remove("no-scroll");
+}
+
+$("#cr-toggle").addEventListener("click", () => {
+  cir.running = !cir.running;
+  $("#cr-toggle").textContent = cir.running ? "Pausa" : "Riprendi";
+  if (cir.running) tieniSchermoAcceso();
+});
+
+$("#cr-skip").addEventListener("click", () => {
+  if (!cir.running && cir.i + 1 >= cir.coda.length) return chiudiCircuito();
+  prossimoSegmento();
+});
+
+$("#cr-close").addEventListener("click", chiudiCircuito);
+
+/* ============================================================
    STORICO
    ============================================================ */
 function renderHistory() {
@@ -520,11 +817,22 @@ function renderHistory() {
     .map((w) => {
       const i = TYPE_INFO[w.type];
       const focusLabel = SESSIONS[w.type][w.focus] ? SESSIONS[w.type][w.focus].label : (w.focus || "");
+      const voce = (e) => {
+        if (e.tipo !== "circuito")
+          return `<li>• ${escapeAttr(e.nome)}${e.det ? " — " + escapeAttr(e.det) : ""}</li>`;
+        const sub = e.esercizi
+          .map(
+            (s) =>
+              `<li class="sub">‣ ${escapeAttr(s.nome)}${
+                s.val ? " — " + s.val + " " + s.unit : ""
+              }</li>`
+          )
+          .join("");
+        return `<li>🔁 <strong>${escapeAttr(e.nome)}</strong> — ${e.giri} giri</li>${sub}`;
+      };
       const fase = (nome, f) =>
         f.esercizi.length
-          ? `<h4>${nome} (${f.min} min)</h4><ul>${f.esercizi
-              .map((e) => `<li>• ${escapeAttr(e.nome)}${e.det ? " — " + escapeAttr(e.det) : ""}</li>`)
-              .join("")}</ul>`
+          ? `<h4>${nome} (${f.min} min)</h4><ul>${f.esercizi.map(voce).join("")}</ul>`
           : "";
       return `<div class="card h-item" data-id="${w.id}">
         <div class="h-head">
@@ -573,13 +881,20 @@ function formatData(iso) {
    ============================================================ */
 function renderProfile() {
   $("#p-peso").value = state.profile.peso;
+  $("#p-altezza").value = state.profile.altezza;
+  $("#p-eta").value = state.profile.eta;
+  $("#p-sesso").value = state.profile.sesso;
   $("#p-obiettivo").value = state.profile.obiettivo;
   $("#p-giorni").value = state.profile.giorni;
 }
 
 $("#btn-profilo").addEventListener("click", () => {
+  const limita = (v, min, max, def) => Math.min(max, Math.max(min, +v || def));
   state.profile = {
-    peso: Math.min(200, Math.max(30, +$("#p-peso").value || 70)),
+    peso: limita($("#p-peso").value, 30, 200, 70),
+    altezza: limita($("#p-altezza").value, 120, 230, 175),
+    eta: limita($("#p-eta").value, 10, 99, 25),
+    sesso: $("#p-sesso").value,
     obiettivo: $("#p-obiettivo").value,
     giorni: +$("#p-giorni").value,
   };
