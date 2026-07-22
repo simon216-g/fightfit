@@ -159,14 +159,21 @@ let kgSuggeriti = {};
 
 function renderCarichi() {
   const card = $("#carichi-card");
-  const esercizi =
-    currentType === "pesi"
-      ? leggiFase("allenamento").filter((e) => e.tipo !== "circuito")
-      : [];
 
-  if (!esercizi.length) {
+  // la sezione esiste solo per la sala pesi
+  if (currentType !== "pesi") {
     card.hidden = true;
     $("#carichi-list").innerHTML = "";
+    return;
+  }
+
+  const esercizi = leggiFase("allenamento").filter((e) => e.tipo !== "circuito");
+
+  // visibile fin da subito, così si sa che c'è: si riempie da sola
+  card.hidden = false;
+  if (!esercizi.length) {
+    $("#carichi-list").innerHTML =
+      `<p class="empty-small">Aggiungi gli esercizi nella fase 💪 Allenamento: li ritrovi qui per segnare i chili.</p>`;
     return;
   }
 

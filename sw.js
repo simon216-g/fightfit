@@ -1,5 +1,8 @@
-/* Service worker: rende l'app utilizzabile offline */
-const CACHE = "fightfit-v2";
+/* Service worker: rende l'app utilizzabile offline.
+   Strategia "prima la rete": se c'è connessione si prende sempre la
+   versione aggiornata (niente doppia apertura per vedere le novità),
+   altrimenti si usa la copia in cache. */
+const CACHE = "fightfit-v3";
 const ASSETS = [
   "./",
   "./index.html",
@@ -25,7 +28,15 @@ self.addEventListener("activate", (e) => {
 });
 
 self.addEventListener("fetch", (e) => {
+  if (e.request.method !== "GET") return;
   e.respondWith(
-    caches.match(e.request).then((hit) => hit || fetch(e.request))
+    fetch(e.request)
+      .then((res) => {
+        // copia aggiornata in cache per l'uso offline
+        const clone = res.clone();
+        caches.open(CACHE).then((c) => c.put(e.request, clone)).catch(() => {});
+        return res;
+      })
+      .catch(() => caches.match(e.request).then((hit) => hit || caches.match("./index.html")))
   );
 });
