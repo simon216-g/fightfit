@@ -202,6 +202,41 @@ input[type="range"] { padding: 0; accent-color: var(--accent); }
 .add-row { display: flex; gap: 8px; flex-wrap: wrap; }
 .add-circuito { background: #2a2340; color: #c4aaff; }
 
+/* ---- Fascia modifica ---- */
+.edit-banner {
+  display: flex; align-items: center; gap: 10px;
+  background: #2a2340; border: 1px solid var(--violet);
+  border-radius: 12px; padding: 10px 12px; margin-bottom: 14px;
+  font-size: .85rem; font-weight: 600; color: #d9c9ff;
+}
+.edit-banner[hidden] { display: none; }
+.edit-banner span { flex: 1; }
+.edit-banner .btn { margin-top: 0; background: #3d3363; color: #fff; }
+
+/* ---- Distanza e tempo corsa ---- */
+.passo-box {
+  margin-top: 14px; background: var(--card2); border-radius: 10px;
+  padding: 12px; text-align: center; font-size: .95rem;
+}
+.passo-box strong { color: var(--green); }
+
+/* ---- Grafici a linea ---- */
+.linechart { margin-top: 12px; }
+.lc { width: 100%; height: auto; display: block; }
+.lc-axis { stroke: #232c3b; stroke-width: 1; }
+.lc text { font-size: 9px; fill: var(--muted); }
+.lc .lc-val { font-size: 10.5px; font-weight: 700; fill: var(--text); }
+.chart-caption { margin-top: 8px; font-size: .75rem; color: var(--muted); text-align: center; }
+
+/* ---- Azioni sullo storico ---- */
+.h-actions { display: flex; gap: 8px; margin-top: 12px; }
+.h-actions button {
+  flex: 1; background: var(--card2); border: 1px solid #2b3648;
+  border-radius: 10px; padding: 10px; font-size: .82rem; font-weight: 600;
+  color: var(--text); cursor: pointer;
+}
+.h-actions .h-del { color: #ff7a8a; }
+
 /* ---- Carichi sala pesi ---- */
 .empty-small { color: var(--muted); font-size: .85rem; padding: 6px 0; }
 .kg-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }

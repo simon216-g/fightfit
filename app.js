@@ -14,7 +14,7 @@ const PROFILO_DEFAULT = {
   eta: 25,
   sesso: "M",
   obiettivo: "combattimento",
-  giorni: 4,
+  giorni: 5,
 };
 
 let state = load();
@@ -25,10 +25,15 @@ function load() {
     if (raw) {
       const s = JSON.parse(raw);
       s.profile = Object.assign({}, PROFILO_DEFAULT, s.profile);
+      // passaggio allo schema 2+2+1: una sola volta, poi la scelta resta dell'utente
+      if (!s.schema5) {
+        s.profile.giorni = 5;
+        s.schema5 = true;
+      }
       return s;
     }
   } catch (e) { /* dati corrotti: riparti pulito */ }
-  return { profile: Object.assign({}, PROFILO_DEFAULT), workouts: [] };
+  return { profile: Object.assign({}, PROFILO_DEFAULT), workouts: [], schema5: true };
 }
 
 function save() {
@@ -128,6 +133,7 @@ $$(".type-btn").forEach((btn) =>
     popolaFocus();
     aggiornaKcal();
     renderCarichi();
+    renderCorsa();
   })
 );
 
@@ -200,6 +206,29 @@ function renderCarichi() {
 
 $("#list-allenamento").addEventListener("input", renderCarichi);
 
+/* ------------------ Distanza e tempo (solo corsa) ------------------ */
+function datiCorsa() {
+  const km = +$("#run-km").value || 0;
+  const sec = (+$("#run-min").value || 0) * 60 + (+$("#run-sec").value || 0);
+  return { km, sec, passo: km > 0 && sec > 0 ? sec / km : 0 };
+}
+
+function renderCorsa() {
+  $("#corsa-card").hidden = currentType !== "corsa";
+  const d = datiCorsa();
+  $("#run-passo").textContent = d.passo ? formattaPasso(d.passo) + " min/km" : "—";
+}
+
+["run-km", "run-min", "run-sec"].forEach((id) =>
+  $("#" + id).addEventListener("input", () => {
+    renderCorsa();
+    // il tempo di corsa È la durata della fase di allenamento: le tengo allineate
+    const d = datiCorsa();
+    if (d.sec > 0) $("#min-allenamento").value = Math.round(d.sec / 60);
+    aggiornaKcal();
+  })
+);
+
 function escapeAttr(s) {
   return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 }
@@ -229,10 +258,10 @@ function circuitoBlock(dati) {
     <div class="ci-config">
       <label>Giri <input type="number" class="ci-giri" min="1" value="${dati?.giri || 3}" inputmode="numeric"></label>
       <label>Rec. esercizi <span class="dual">
-        <input type="number" class="ci-rec-es" min="0" value="${dati ? dati.recEsVal : 15}" inputmode="numeric">
+        <input type="number" class="ci-rec-es" min="0" value="${dati?.recEsVal ?? 15}" inputmode="numeric">
         <select class="ci-rec-es-unit"><option value="sec">sec</option><option value="min">min</option></select></span></label>
       <label>Rec. giri <span class="dual">
-        <input type="number" class="ci-rec-giri" min="0" value="${dati ? dati.recGiriVal : 60}" inputmode="numeric">
+        <input type="number" class="ci-rec-giri" min="0" value="${dati?.recGiriVal ?? 60}" inputmode="numeric">
         <select class="ci-rec-giri-unit"><option value="sec">sec</option><option value="min">min</option></select></span></label>
     </div>
     <div class="ci-list"></div>
@@ -250,6 +279,10 @@ function circuitoBlock(dati) {
     refreshCircuito(el);
     aggiornaDurataCircuiti();
   });
+
+  // ripristina le unità di misura quando si riapre un circuito salvato
+  if (dati?.recEsUnit) el.querySelector(".ci-rec-es-unit").value = dati.recEsUnit;
+  if (dati?.recGiriUnit) el.querySelector(".ci-rec-giri-unit").value = dati.recGiriUnit;
 
   const esercizi = dati?.esercizi?.length ? dati.esercizi : [{}, {}];
   esercizi.forEach((e) => ciExRow(el, e));
@@ -382,6 +415,7 @@ function precompilaForm(seduta) {
   });
   $("#carichi-list").innerHTML = "";
   renderCarichi();
+  renderCorsa();
   aggiornaKcal();
 }
 
@@ -411,7 +445,8 @@ function aggiornaKcal() {
     +$("#min-riscaldamento").value || 0,
     +$("#min-allenamento").value || 0,
     +$("#min-defaticamento").value || 0,
-    state.profile
+    state.profile,
+    currentType === "corsa" ? datiCorsa().passo : 0
   );
 }
 
@@ -442,8 +477,10 @@ $("#btn-salva").addEventListener("click", () => {
     }
   });
 
+  const corsa = currentType === "corsa" ? datiCorsa() : null;
+
   const w = {
-    id: Date.now(),
+    id: editingId || Date.now(),
     date: $("#w-date").value || new Date().toISOString().slice(0, 10),
     type: currentType,
     focus: $("#w-focus").value,
@@ -462,9 +499,26 @@ $("#btn-salva").addEventListener("click", () => {
       riscMin,
       allMin,
       defMin,
-      state.profile
+      state.profile,
+      corsa ? corsa.passo : 0
     ),
   };
+
+  if (corsa && corsa.km > 0 && corsa.sec > 0) {
+    w.km = corsa.km;
+    w.tempoSec = corsa.sec;
+  }
+
+  if (editingId) {
+    const i = state.workouts.findIndex((x) => x.id === editingId);
+    if (i >= 0) state.workouts[i] = w;
+    else state.workouts.push(w);
+    save();
+    resetForm();
+    toast("✅ Allenamento aggiornato");
+    showView("history");
+    return;
+  }
 
   state.workouts.push(w);
   save();
@@ -473,11 +527,73 @@ $("#btn-salva").addEventListener("click", () => {
   showView("home");
 });
 
+/* ------------------ Modifica di un allenamento salvato ------------------ */
+let editingId = null;
+
+function setModalitaModifica(id) {
+  editingId = id;
+  $("#edit-banner").hidden = !id;
+  $("#btn-salva").textContent = id ? "✅ Aggiorna allenamento" : "💾 Salva allenamento";
+}
+
+function caricaPerModifica(w) {
+  currentType = w.type;
+  $$(".type-btn").forEach((b) => b.classList.toggle("active", b.dataset.type === w.type));
+  popolaFocus();
+  $("#w-focus").value = w.focus;
+
+  kgSuggeriti = {};
+  ["riscaldamento", "allenamento", "defaticamento"].forEach((phase) => {
+    const lista = $("#list-" + phase);
+    lista.innerHTML = "";
+    (w.fasi[phase].esercizi || []).forEach((e) => {
+      if (e.tipo === "circuito") lista.appendChild(circuitoBlock(e));
+      else exRow(phase, e.nome, e.det);
+    });
+    $("#min-" + phase).value = w.fasi[phase].min;
+  });
+  // i minuti salvati comprendono già i circuiti: allineo il riferimento
+  circuitiMinLast = leggiFase("allenamento")
+    .filter((x) => x.tipo === "circuito")
+    .reduce((s, c) => s + stimaMinutiCircuito(c), 0);
+
+  $("#w-date").value = w.date;
+  $("#w-rpe").value = w.rpe;
+  $("#rpe-val").textContent = w.rpe;
+  $("#rpe-hint").textContent = RPE_HINTS[w.rpe];
+  $("#w-note").value = w.note || "";
+
+  $("#run-km").value = w.km || "";
+  $("#run-min").value = w.tempoSec ? Math.floor(w.tempoSec / 60) : "";
+  $("#run-sec").value = w.tempoSec ? w.tempoSec % 60 : "";
+  renderCorsa();
+
+  $("#carichi-list").innerHTML = "";
+  renderCarichi();
+  (w.fasi.allenamento.esercizi || []).forEach((e) => {
+    if (e.tipo === "circuito" || !e.kg) return;
+    const row = $$("#carichi-list .kg-row").find((r) => r.dataset.nome === e.nome.toLowerCase());
+    if (row) row.querySelector(".kg-input").value = e.kg;
+  });
+
+  setModalitaModifica(w.id);
+  aggiornaKcal();
+}
+
+$("#btn-annulla-modifica").addEventListener("click", () => {
+  resetForm();
+  showView("history");
+  toast("Modifica annullata");
+});
+
 function resetForm() {
   circuitiMinLast = 0;
   kgSuggeriti = {};
+  setModalitaModifica(null);
   $("#carichi-list").innerHTML = "";
   $("#carichi-card").hidden = true;
+  ["run-km", "run-min", "run-sec"].forEach((id) => ($("#" + id).value = ""));
+  renderCorsa();
   ["riscaldamento", "allenamento", "defaticamento"].forEach(
     (p) => ($("#list-" + p).innerHTML = "")
   );
@@ -854,9 +970,126 @@ $("#cr-skip").addEventListener("click", () => {
 $("#cr-close").addEventListener("click", chiudiCircuito);
 
 /* ============================================================
+   GRAFICI DI PROGRESSIONE
+   ============================================================ */
+
+/* Grafico a linea in SVG: valore più alto = punto più in alto */
+function graficoLinea(punti, opt) {
+  opt = opt || {};
+  if (!punti.length)
+    return `<div class="empty">${opt.vuoto || "Nessun dato ancora registrato."}</div>`;
+
+  const W = 320, H = 172, L = 12, R = 12, T = 26, B = 42;
+  const vals = punti.map((p) => p.val);
+  let min = Math.min(...vals), max = Math.max(...vals);
+  if (min === max) {
+    const d = Math.max(1, Math.abs(min) * 0.08);
+    min -= d;
+    max += d;
+  }
+  const n = punti.length;
+  const x = (i) => (n === 1 ? W / 2 : L + (i * (W - L - R)) / (n - 1));
+  const y = (v) => T + (H - T - B) * (1 - (v - min) / (max - min));
+  const colore = opt.colore || "var(--accent2)";
+
+  const linea = punti.map((p, i) => `${x(i).toFixed(1)},${y(p.val).toFixed(1)}`).join(" ");
+  const area = `${x(0).toFixed(1)},${H - B} ${linea} ${x(n - 1).toFixed(1)},${H - B}`;
+  const ancora = (i) => (n === 1 ? "middle" : i === 0 ? "start" : i === n - 1 ? "end" : "middle");
+
+  const punti_svg = punti
+    .map(
+      (p, i) => `
+    <circle cx="${x(i).toFixed(1)}" cy="${y(p.val).toFixed(1)}" r="3.8" fill="${colore}"/>
+    <text class="lc-val" x="${x(i).toFixed(1)}" y="${(y(p.val) - 10).toFixed(1)}" text-anchor="${ancora(i)}">${p.testo}</text>
+    ${p.sotto ? `<text class="lc-sub" x="${x(i).toFixed(1)}" y="${H - B + 16}" text-anchor="${ancora(i)}">${p.sotto}</text>` : ""}
+    <text class="lc-data" x="${x(i).toFixed(1)}" y="${H - B + 31}" text-anchor="${ancora(i)}">${p.data}</text>`
+    )
+    .join("");
+
+  return `<svg class="lc" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">
+    <line class="lc-axis" x1="0" y1="${H - B}" x2="${W}" y2="${H - B}"/>
+    <polygon points="${area}" fill="${colore}" opacity=".13"/>
+    <polyline points="${linea}" fill="none" stroke="${colore}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+    ${punti_svg}
+  </svg>`;
+}
+
+function dataBreve(iso) {
+  const [, m, d] = iso.split("-");
+  return `${+d}/${+m}`;
+}
+
+/* Corsa: per fondo e lungo conta il passo, per intervalli e ripetute
+   il passo medio è falsato dai recuperi, quindi si guarda il volume */
+function renderGraficoCorsa() {
+  const focus = $("#chart-corsa-focus").value;
+  const passoFocus = focus === "lento" || focus === "lungo";
+
+  const ws = state.workouts
+    .filter((w) => w.type === "corsa" && w.focus === focus && w.km > 0 && w.tempoSec > 0)
+    .sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id)
+    .slice(-8);
+
+  const punti = ws.map((w) => {
+    const passo = w.tempoSec / w.km;
+    return passoFocus
+      ? { val: passo, testo: formattaPasso(passo), sotto: formattaKm(w.km) + " km", data: dataBreve(w.date) }
+      : { val: w.km, testo: formattaKm(w.km) + " km", sotto: formattaPasso(passo) + "/km", data: dataBreve(w.date) };
+  });
+
+  // per il passo l'asse resta naturale: la linea che scende = più veloce
+  $("#chart-corsa").innerHTML = graficoLinea(punti, {
+    colore: "var(--green)",
+    vuoto: "Nessuna corsa di questo tipo con distanza e tempo registrati.",
+  });
+  $("#caption-corsa").textContent = !punti.length
+    ? ""
+    : passoFocus
+    ? "Passo in min/km — più la linea scende, più sei veloce."
+    : "Chilometri per seduta — sotto ogni punto il passo medio (recuperi inclusi).";
+}
+
+/* Pesi: progressione del carico sui cinque esercizi principali */
+function renderGraficoPesi() {
+  const lift = $("#chart-lift").value;
+  const punti = [];
+
+  state.workouts
+    .filter((w) => w.type === "pesi")
+    .sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id)
+    .forEach((w) => {
+      (w.fasi.allenamento.esercizi || []).forEach((e) => {
+        if (e.tipo === "circuito" || !e.kg) return;
+        if (riconosciLift(e.nome) !== lift) return;
+        const rip = ripetizioniDa(e.det);
+        punti.push({
+          val: e.kg,
+          testo: formattaKg(e.kg),
+          sotto: rip ? "×" + rip : "",
+          data: dataBreve(w.date),
+        });
+      });
+    });
+
+  const ultimi = punti.slice(-8);
+  $("#chart-pesi").innerHTML = graficoLinea(ultimi, {
+    colore: "var(--blue)",
+    vuoto: `Nessun carico registrato per ${LIFT_LABELS[lift]}.`,
+  });
+  $("#caption-pesi").textContent = ultimi.length
+    ? "Chilogrammi sollevati — sotto ogni punto le ripetizioni della serie."
+    : "Segna i carichi a fine allenamento per vedere la progressione.";
+}
+
+$("#chart-corsa-focus").addEventListener("change", renderGraficoCorsa);
+$("#chart-lift").addEventListener("change", renderGraficoPesi);
+
+/* ============================================================
    STORICO
    ============================================================ */
 function renderHistory() {
+  renderGraficoCorsa();
+  renderGraficoPesi();
   const list = $("#history-list");
   const ws = [...state.workouts].sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id);
 
@@ -924,8 +1157,20 @@ function renderHistory() {
           ${fase("🔥 Riscaldamento", w.fasi.riscaldamento)}
           ${fase("💪 Allenamento", w.fasi.allenamento)}
           ${fase("🧘 Defaticamento", w.fasi.defaticamento)}
+          ${
+            w.km && w.tempoSec
+              ? `<h4>🏃 Distanza</h4><ul><li>• ${formattaKm(w.km)} km in ${Math.floor(
+                  w.tempoSec / 60
+                )}:${String(w.tempoSec % 60).padStart(2, "0")} — passo ${formattaPasso(
+                  w.tempoSec / w.km
+                )} min/km</li></ul>`
+              : ""
+          }
           ${w.note ? `<h4>📝 Note</h4><p>${escapeAttr(w.note)}</p>` : ""}
-          <button class="h-del">🗑 Elimina allenamento</button>
+          <div class="h-actions">
+            <button class="h-edit">✏️ Modifica</button>
+            <button class="h-del">🗑 Elimina</button>
+          </div>
         </div>
       </div>`;
     })
@@ -934,6 +1179,22 @@ function renderHistory() {
   $$(".h-head").forEach((h) =>
     h.addEventListener("click", () => h.parentElement.classList.toggle("open"))
   );
+  $$(".h-edit").forEach((btn) =>
+    btn.addEventListener("click", (e) => {
+      const id = +e.target.closest(".h-item").dataset.id;
+      const w = state.workouts.find((x) => x.id === id);
+      if (!w) return;
+      if (
+        !confirm(
+          "Vuoi modificare questo allenamento?\n\nSi apre nella schermata Nuovo con tutti i dati già compilati: salvando, sostituirai quello esistente."
+        )
+      )
+        return;
+      caricaPerModifica(w);
+      showView("new");
+    })
+  );
+
   $$(".h-del").forEach((btn) =>
     btn.addEventListener("click", (e) => {
       const id = +e.target.closest(".h-item").dataset.id;

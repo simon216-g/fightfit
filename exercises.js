@@ -22,6 +22,66 @@ const FOCUS_MET = {
 /* Focus ad alta intensità: generano consumo extra post-allenamento (EPOC) */
 const FOCUS_INTENSI = ["intervalli", "ripetute", "condizionamento", "circuito", "esplosivita"];
 
+/* MET della corsa in base al passo reale (minuti per km):
+   correre a 4:30/km costa molto più che a 6:30/km, a parità di tempo */
+function metDaPasso(minPerKm) {
+  if (!minPerKm || minPerKm <= 0) return null;
+  if (minPerKm <= 3.5) return 16.0;
+  if (minPerKm <= 4.0) return 14.5;
+  if (minPerKm <= 4.5) return 13.0;
+  if (minPerKm <= 5.0) return 11.8;
+  if (minPerKm <= 5.5) return 10.8;
+  if (minPerKm <= 6.0) return 9.8;
+  if (minPerKm <= 6.5) return 9.0;
+  if (minPerKm <= 7.0) return 8.3;
+  if (minPerKm <= 7.5) return 7.5;
+  if (minPerKm <= 8.5) return 6.8;
+  return 6.0;
+}
+
+/* ------------------ Esercizi principali tracciati ------------------
+   Riconosce le varianti di nome così che il grafico raccolga tutto. */
+const LIFT_MATCH = [
+  { id: "panca", re: /panca\s*piana|bench\s*press/i },
+  { id: "military", re: /military|lento\s*avanti|shoulder\s*press/i },
+  { id: "lat", re: /lat\s*machine|latmachine|trazion|pulldown|pull[-\s]?up/i },
+  { id: "stacco", re: /stacco|deadlift/i },
+  { id: "squat", re: /squat/i },
+];
+
+const LIFT_LABELS = {
+  panca: "Panca piana",
+  squat: "Squat",
+  military: "Military press",
+  lat: "Lat machine / trazioni",
+  stacco: "Stacco",
+};
+
+function riconosciLift(nome) {
+  if (!nome) return null;
+  if (/jump|salto|balzo/i.test(nome)) return null; // squat jump non è forza massimale
+  const hit = LIFT_MATCH.find((l) => l.re.test(nome));
+  return hit ? hit.id : null;
+}
+
+/* Ripetizioni indicate nel dettaglio ("4 × 8" → 8) */
+function ripetizioniDa(det) {
+  const m = String(det || "").match(/[×x]\s*(\d+)/);
+  return m ? +m[1] : null;
+}
+
+/* ------------------ Formattazione ------------------ */
+function formattaPasso(secPerKm) {
+  if (!secPerKm || !isFinite(secPerKm)) return "—";
+  const m = Math.floor(secPerKm / 60);
+  const s = Math.round(secPerKm % 60);
+  return s === 60 ? `${m + 1}:00` : `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function formattaKm(km) {
+  return String(Math.round(km * 100) / 100).replace(".", ",");
+}
+
 /* ------------------ Riscaldamenti ------------------ */
 const WARMUPS = {
   muaythai: [
@@ -397,8 +457,33 @@ function generaSeduta(type, focus, workouts) {
 
 /* Piano settimanale in base all'obiettivo e ai giorni disponibili,
    con spunta su ciò che è già stato fatto negli ultimi 7 giorni */
+/* Con 5 allenamenti a settimana si usa lo schema fisso
+   2 sala pesi + 2 Muay Thai + 1 corsa. Quali sedute finiscano
+   nelle caselle lo decide comunque l'obiettivo scelto. */
+function schemaFisso(obiettivo) {
+  const pref = GOAL_PLANS[obiettivo];
+  const scegli = (type, quante) => {
+    const out = [];
+    const aggiungi = (slot) => {
+      if (out.length < quante && !out.some((s) => s.focus === slot.focus)) out.push(slot);
+    };
+    pref.filter((s) => s.type === type).forEach(aggiungi);
+    Object.keys(SESSIONS[type]).forEach((focus) => aggiungi({ type, focus }));
+    return out;
+  };
+  const pesi = scegli("pesi", 2);
+  const mt = scegli("muaythai", 2);
+  const corsa = scegli("corsa", 1);
+  return [mt[0], pesi[0], mt[1], pesi[1], corsa[0]];
+}
+
+function slotsSettimana(profile) {
+  if (+profile.giorni === 5) return schemaFisso(profile.obiettivo);
+  return GOAL_PLANS[profile.obiettivo].slice(0, profile.giorni);
+}
+
 function pianoSettimanale(profile, workouts) {
-  const plan = GOAL_PLANS[profile.obiettivo].slice(0, profile.giorni);
+  const plan = slotsSettimana(profile);
   const settimana = ultimi7Giorni(workouts);
   const usati = new Set();
   return plan.map((slot) => {
@@ -441,17 +526,21 @@ function rmrPerMinuto(p) {
 }
 
 /* MET della seduta corretto con la fatica percepita:
-   ±7,5% per ogni punto RPE sopra/sotto il riferimento 7 */
-function metEffettivo(type, focus, rpe) {
+   ±7,5% per ogni punto RPE sopra/sotto il riferimento 7.
+   Per la corsa, se conosciamo il passo reale quello ha la precedenza:
+   è un dato oggettivo, quindi la correzione sull'RPE si fa più leggera. */
+function metEffettivo(type, focus, rpe, passoSecKm) {
   const tab = FOCUS_MET[type] || {};
-  const base = tab[focus] || TYPE_INFO[type].met;
-  const fattore = Math.min(1.35, Math.max(0.6, 1 + ((rpe || 7) - 7) * 0.075));
+  const daPasso = type === "corsa" ? metDaPasso(passoSecKm / 60) : null;
+  const base = daPasso || tab[focus] || TYPE_INFO[type].met;
+  const peso = daPasso ? 0.03 : 0.075;
+  const fattore = Math.min(1.35, Math.max(0.6, 1 + ((rpe || 7) - 7) * peso));
   return base * fattore;
 }
 
-function stimaCalorie(type, focus, rpe, minRisc, minAll, minDef, profile) {
+function stimaCalorie(type, focus, rpe, minRisc, minAll, minDef, profile, passoSecKm) {
   const rmr = rmrPerMinuto(profile);
-  const met = metEffettivo(type, focus, rpe);
+  const met = metEffettivo(type, focus, rpe, passoSecKm);
   // consumo netto: (MET - 1) perché 1 MET è quello che si spende comunque a riposo
   const kcal =
     (MET_RISCALDAMENTO - 1) * rmr * (minRisc || 0) +
