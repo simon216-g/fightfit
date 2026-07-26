@@ -46,7 +46,7 @@
         <button class="type-btn" data-type="pesi">🏋️<br>Sala Pesi</button>
         <button class="type-btn" data-type="corsa">🏃<br>Corsa</button>
       </div>
-      <label class="field-label" for="w-focus">Focus della seduta</label>
+      <label class="field-label" for="w-focus" id="label-focus">Focus della seduta</label>
       <select id="w-focus"></select>
       <button id="btn-genera" class="btn secondary full">✨ Genera seduta consigliata</button>
     </div>
@@ -68,6 +68,25 @@
       </div>
       <label class="field-label">Durata (min)</label>
       <input type="number" class="phase-min" id="min-allenamento" min="0" value="40" inputmode="numeric">
+    </div>
+
+    <div class="card phase" id="fase-sacco" data-phase="sacco" hidden>
+      <h3>🥊 Sacco / Pad</h3>
+      <div id="schema-box" class="schema-box" hidden>
+        <div class="schema-testa">
+          <div>
+            <div class="schema-nome" id="schema-nome"></div>
+            <div class="schema-det" id="schema-det"></div>
+          </div>
+          <button id="btn-avvia-schema" class="btn schema-avvia">▶️ Avvia</button>
+        </div>
+        <div class="schema-note" id="schema-note"></div>
+      </div>
+      <div class="ex-list" id="list-sacco"></div>
+      <button class="btn tiny add-ex" data-phase="sacco">+ Aggiungi combinazione</button>
+      <p class="muted mini">Nelle combinazioni ai pad le azioni difensive portano il nome del colpo dell'avversario: "roll gancio sx" = lui tira il gancio sinistro.</p>
+      <label class="field-label">Durata (min)</label>
+      <input type="number" class="phase-min" id="min-sacco" min="0" value="20" inputmode="numeric">
     </div>
 
     <div class="card phase" data-phase="defaticamento">
@@ -286,6 +305,7 @@
 
 <div id="toast" class="toast"></div>
 
+<script src="catalogo.js"></script>
 <script src="exercises.js"></script>
 <script src="app.js"></script>
 </body>

@@ -202,6 +202,27 @@ input[type="range"] { padding: 0; accent-color: var(--accent); }
 .add-row { display: flex; gap: 8px; flex-wrap: wrap; }
 .add-circuito { background: #2a2340; color: #c4aaff; }
 
+/* ---- Schema al sacco ---- */
+.schema-box {
+  background: linear-gradient(135deg, #2a1a17, var(--card2));
+  border: 1px solid #4a2d26;
+  border-radius: 12px;
+  padding: 12px;
+  margin: 10px 0 4px;
+}
+.schema-box[hidden] { display: none; }
+.schema-testa { display: flex; align-items: center; gap: 10px; }
+.schema-testa > div { flex: 1; min-width: 0; }
+.schema-nome { font-weight: 800; font-size: .98rem; }
+.schema-det { color: var(--muted); font-size: .8rem; margin-top: 2px; }
+.schema-note { color: #cbd5e3; font-size: .78rem; margin-top: 8px; font-style: italic; }
+.schema-avvia {
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  color: #fff; padding: 11px 14px; white-space: nowrap; font-size: .85rem;
+}
+
+.muted.mini { font-size: .72rem; line-height: 1.35; margin-top: 10px; }
+
 /* ---- Fascia modifica ---- */
 .edit-banner {
   display: flex; align-items: center; gap: 10px;

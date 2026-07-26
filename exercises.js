@@ -14,13 +14,16 @@ const MET_DEFATICAMENTO = 2.5;
 /* MET specifici per focus: una seduta tecnica e una di condizionamento
    non consumano allo stesso modo (valori dal Compendium of Physical Activities) */
 const FOCUS_MET = {
-  muaythai: { tecnica: 8.5, sacco: 10.5, condizionamento: 11.0 },
-  pesi: { spinta: 5.5, trazione: 5.5, gambe: 6.0, esplosivita: 6.5, circuito: 8.0 },
+  muaythai: { completo: 10.0 },
+  pesi: { spinta: 5.5, trazione: 5.5, gambe: 6.0 },
   corsa: { lento: 8.3, lungo: 9.0, intervalli: 11.5, ripetute: 12.0 },
 };
 
+/* Lavoro al sacco/pad: fase a sé, sempre intensa */
+const MET_SACCO = 10.5;
+
 /* Focus ad alta intensità: generano consumo extra post-allenamento (EPOC) */
-const FOCUS_INTENSI = ["intervalli", "ripetute", "condizionamento", "circuito", "esplosivita"];
+const FOCUS_INTENSI = ["intervalli", "ripetute", "completo"];
 
 /* MET della corsa in base al passo reale (minuti per km):
    correre a 4:30/km costa molto più che a 6:30/km, a parità di tempo */
@@ -59,7 +62,8 @@ const LIFT_LABELS = {
 
 function riconosciLift(nome) {
   if (!nome) return null;
-  if (/jump|salto|balzo/i.test(nome)) return null; // squat jump non è forza massimale
+  // varianti che non rappresentano la forza massimale del fondamentale
+  if (/jump|salto|balzo|tenuta|corpo\s*libero|spinta|kettle/i.test(nome)) return null;
   const hit = LIFT_MATCH.find((l) => l.re.test(nome));
   return hit ? hit.id : null;
 }
@@ -85,9 +89,9 @@ function formattaKm(km) {
 /* ------------------ Riscaldamenti ------------------ */
 const WARMUPS = {
   muaythai: [
+    { nome: "Mobilità articolare", det: "8 min — anche, spalle, collo" },
     { nome: "Corda", det: "3 round × 3 min" },
-    { nome: "Mobilità anche e spalle", det: "5 min" },
-    { nome: "Shadow boxing leggero", det: "2 round × 2 min" },
+    { nome: "Shadow boxing", det: "2 round × 2 min" },
   ],
   pesi: [
     { nome: "Cyclette o tapis roulant", det: "5-8 min ritmo blando" },
@@ -120,98 +124,36 @@ const COOLDOWNS = {
   ],
 };
 
-/* ------------------ Sedute principali ------------------
-   Ogni focus ha: label, durata consigliata (min) e lista esercizi.
-   "prog" indica come far progredire l'esercizio quando l'utente migliora. */
+/* ------------------ Sedute ------------------
+   Muay Thai e sala pesi pescano gli esercizi dal catalogo:
+   "gruppi" dice quanti esercizi prendere da ogni gruppo muscolare.
+   La corsa mantiene sedute a schema fisso. */
 const SESSIONS = {
   muaythai: {
-    tecnica: {
-      label: "Tecnica",
-      durata: 45,
-      esercizi: [
-        { nome: "Shadow boxing tecnico", det: "4 round × 3 min", prog: "round" },
-        { nome: "Colpitelli / pao con compagno", det: "4 round × 3 min", prog: "round" },
-        { nome: "Tecnica di gamba: teep e low kick", det: "3 round × 2 min per gamba", prog: "round" },
-        { nome: "Clinch e ginocchiate al sacco", det: "3 round × 2 min", prog: "round" },
-      ],
-    },
-    sacco: {
-      label: "Sacco e potenza",
-      durata: 40,
-      esercizi: [
-        { nome: "Sacco: combinazioni libere", det: "5 round × 3 min", prog: "round" },
-        { nome: "Sacco: solo calci in potenza", det: "3 round × 2 min", prog: "round" },
-        { nome: "Sprint di pugni sul sacco", det: "6 × 20 sec (10 sec pausa)", prog: "serie" },
-        { nome: "Ginocchiate in clinch al sacco", det: "3 × 30 colpi", prog: "rip" },
-      ],
-    },
-    condizionamento: {
-      label: "Condizionamento fighter",
-      durata: 35,
-      esercizi: [
-        { nome: "Circuito: burpees", det: "4 × 12", prog: "rip" },
-        { nome: "Squat jump", det: "4 × 15", prog: "rip" },
-        { nome: "Flessioni esplosive", det: "4 × 10", prog: "rip" },
-        { nome: "Addominali completi (plank + crunch + russian twist)", det: "3 giri × 40 sec ciascuno", prog: "serie" },
-        { nome: "Corda alta intensità", det: "5 × 1 min (30 sec pausa)", prog: "serie" },
-      ],
+    completo: {
+      label: "Allenamento completo",
+      minuti: { riscaldamento: 20, allenamento: 20, sacco: 20, defaticamento: 10 },
+      // la parte centrale prende un esercizio da ciascun gruppo
+      gruppi: [["pettoSpalle", 1], ["addome", 1], ["gambe", 1], ["completo", 1]],
+      // in versione a esercizi separati se ne aggiunge uno "completo" in più
+      extraSeparati: [["completo", 1]],
     },
   },
   pesi: {
     spinta: {
-      label: "Spinta (petto/spalle/tricipiti)",
-      durata: 50,
-      esercizi: [
-        { nome: "Panca piana", det: "4 × 8", prog: "carico" },
-        { nome: "Lento avanti manubri", det: "3 × 10", prog: "carico" },
-        { nome: "Panca inclinata manubri", det: "3 × 10", prog: "carico" },
-        { nome: "Dip o pushdown tricipiti", det: "3 × 12", prog: "rip" },
-        { nome: "Alzate laterali", det: "3 × 15", prog: "rip" },
-      ],
+      label: "Petto / spalle / tricipiti",
+      minuti: { riscaldamento: 10, allenamento: 50, defaticamento: 10 },
+      gruppi: [["petto", 2], ["spalle", 2], ["tricipiti", 1], ["addome", 1]],
     },
     trazione: {
-      label: "Trazione (schiena/bicipiti)",
-      durata: 50,
-      esercizi: [
-        { nome: "Trazioni o lat machine", det: "4 × 8", prog: "carico" },
-        { nome: "Rematore bilanciere", det: "4 × 10", prog: "carico" },
-        { nome: "Pulley basso", det: "3 × 12", prog: "carico" },
-        { nome: "Curl bilanciere", det: "3 × 12", prog: "rip" },
-        { nome: "Face pull", det: "3 × 15", prog: "rip" },
-      ],
+      label: "Schiena / bicipiti",
+      minuti: { riscaldamento: 10, allenamento: 50, defaticamento: 10 },
+      gruppi: [["schiena", 3], ["bicipiti", 2], ["addome", 1]],
     },
     gambe: {
-      label: "Gambe e core",
-      durata: 50,
-      esercizi: [
-        { nome: "Squat", det: "4 × 8", prog: "carico" },
-        { nome: "Stacco rumeno", det: "3 × 10", prog: "carico" },
-        { nome: "Affondi con manubri", det: "3 × 10 per gamba", prog: "carico" },
-        { nome: "Calf in piedi", det: "4 × 15", prog: "rip" },
-        { nome: "Plank", det: "3 × 45 sec", prog: "serie" },
-      ],
-    },
-    esplosivita: {
-      label: "Forza esplosiva (per il combattimento)",
-      durata: 45,
-      esercizi: [
-        { nome: "Squat jump con manubri leggeri", det: "4 × 6", prog: "carico" },
-        { nome: "Panca con spinta esplosiva", det: "4 × 5 (carico medio)", prog: "carico" },
-        { nome: "Lanci palla medica", det: "4 × 8", prog: "rip" },
-        { nome: "Trazioni esplosive", det: "4 × 5", prog: "rip" },
-        { nome: "Rotazioni al cavo (core rotazionale)", det: "3 × 10 per lato", prog: "carico" },
-      ],
-    },
-    circuito: {
-      label: "Circuito full body (brucia grassi)",
-      durata: 40,
-      esercizi: [
-        { nome: "Goblet squat", det: "3 giri × 15", prog: "rip" },
-        { nome: "Rematore manubrio", det: "3 giri × 12 per lato", prog: "rip" },
-        { nome: "Flessioni", det: "3 giri × 12", prog: "rip" },
-        { nome: "Kettlebell swing", det: "3 giri × 15", prog: "rip" },
-        { nome: "Mountain climber", det: "3 giri × 40 sec", prog: "serie" },
-      ],
+      label: "Gambe",
+      minuti: { riscaldamento: 10, allenamento: 50, defaticamento: 10 },
+      gruppi: [["gambe", 5], ["addome", 1]],
     },
   },
   corsa: {
@@ -252,46 +194,60 @@ const SESSIONS = {
    Ordine = priorità. Il motore propone la voce meno coperta negli ultimi 7 giorni. */
 const GOAL_PLANS = {
   combattimento: [
-    { type: "muaythai", focus: "tecnica" },
-    { type: "muaythai", focus: "sacco" },
-    { type: "pesi", focus: "esplosivita" },
+    { type: "muaythai", focus: "completo" },
+    { type: "pesi", focus: "spinta" },
+    { type: "muaythai", focus: "completo" },
     { type: "corsa", focus: "intervalli" },
-    { type: "muaythai", focus: "condizionamento" },
+    { type: "pesi", focus: "gambe" },
     { type: "corsa", focus: "lento" },
   ],
   dimagrimento: [
     { type: "corsa", focus: "intervalli" },
-    { type: "pesi", focus: "circuito" },
-    { type: "muaythai", focus: "sacco" },
+    { type: "muaythai", focus: "completo" },
+    { type: "pesi", focus: "gambe" },
     { type: "corsa", focus: "lento" },
-    { type: "muaythai", focus: "condizionamento" },
-    { type: "pesi", focus: "circuito" },
+    { type: "muaythai", focus: "completo" },
+    { type: "pesi", focus: "spinta" },
   ],
   massa: [
     { type: "pesi", focus: "spinta" },
     { type: "pesi", focus: "trazione" },
     { type: "pesi", focus: "gambe" },
+    { type: "muaythai", focus: "completo" },
     { type: "corsa", focus: "lento" },
-    { type: "pesi", focus: "spinta" },
-    { type: "muaythai", focus: "tecnica" },
+    { type: "muaythai", focus: "completo" },
   ],
   resistenza: [
     { type: "corsa", focus: "lungo" },
     { type: "corsa", focus: "intervalli" },
-    { type: "pesi", focus: "circuito" },
-    { type: "muaythai", focus: "condizionamento" },
+    { type: "muaythai", focus: "completo" },
+    { type: "pesi", focus: "gambe" },
     { type: "corsa", focus: "ripetute" },
-    { type: "corsa", focus: "lento" },
+    { type: "muaythai", focus: "completo" },
   ],
   benessere: [
     { type: "corsa", focus: "lento" },
-    { type: "pesi", focus: "circuito" },
-    { type: "muaythai", focus: "tecnica" },
+    { type: "pesi", focus: "spinta" },
+    { type: "muaythai", focus: "completo" },
     { type: "corsa", focus: "lento" },
     { type: "pesi", focus: "gambe" },
-    { type: "muaythai", focus: "sacco" },
+    { type: "muaythai", focus: "completo" },
   ],
 };
+
+/* Sedute non più proposte, ma presenti negli allenamenti già salvati */
+const FOCUS_STORICI = {
+  tecnica: "Tecnica",
+  sacco: "Sacco e potenza",
+  condizionamento: "Condizionamento",
+  esplosivita: "Forza esplosiva",
+  circuito: "Circuito full body",
+};
+
+function etichettaFocus(type, focus) {
+  const s = SESSIONS[type] && SESSIONS[type][focus];
+  return s ? s.label : FOCUS_STORICI[focus] || focus || "";
+}
 
 const GOAL_LABELS = {
   combattimento: "Migliorare nella Muay Thai",
@@ -439,20 +395,295 @@ function formattaKg(kg) {
   return String(kg).replace(".", ",");
 }
 
-/* Genera una seduta completa (3 fasi) per tipo+focus, adattata ai progressi */
-function generaSeduta(type, focus, workouts) {
+/* ============================================================
+   MEMORIA DEGLI ESERCIZI
+   Scorre gli allenamenti salvati e ricostruisce due informazioni:
+   quando hai fatto ogni esercizio, e quanto sono carichi i muscoli.
+   ============================================================ */
+
+/* Tutti gli esercizi di un allenamento, circuiti inclusi (appiattiti) */
+function eserciziDi(w) {
+  const out = [];
+  Object.values(w.fasi || {}).forEach((fase) =>
+    (fase.esercizi || []).forEach((e) => {
+      if (e.tipo === "circuito") (e.esercizi || []).forEach((s) => out.push(s));
+      else out.push(e);
+    })
+  );
+  return out;
+}
+
+/* Giorni trascorsi dall'ultima volta che hai fatto ogni esercizio.
+   Chiave = nome in minuscolo, valore = giorni (0 = oggi). */
+function ultimoUsoEsercizi(workouts) {
+  const mappa = {};
+  workouts.forEach((w) => {
+    const g = giorniDa(w.date);
+    eserciziDi(w).forEach((e) => {
+      if (!e.nome) return;
+      const k = e.nome.toLowerCase();
+      if (mappa[k] == null || g < mappa[k]) mappa[k] = g;
+    });
+  });
+  return mappa;
+}
+
+/* Quanto peso dare a un allenamento in base a quanti giorni fa è stato:
+   oggi e ieri contano pieno, poi l'effetto svanisce. */
+function pesoRecenza(giorni) {
+  if (giorni <= 1) return 1;
+  if (giorni === 2) return 0.6;
+  if (giorni === 3) return 0.3;
+  return 0;
+}
+
+/* Carico accumulato per muscolo negli ultimi giorni.
+   Il muscolo principale di un esercizio pesa il doppio dei secondari. */
+function caricoMuscolare(workouts) {
+  const fatica = {};
+  workouts.forEach((w) => {
+    const peso = pesoRecenza(giorniDa(w.date));
+    if (!peso) return;
+    // una seduta percepita dura affatica di più
+    const intensita = peso * (0.8 + ((w.rpe || 7) / 10) * 0.4);
+    eserciziDi(w).forEach((e) => {
+      const muscoli = muscoliDi(e.nome);
+      if (!muscoli) return;
+      muscoli.forEach((m, i) => {
+        fatica[m] = (fatica[m] || 0) + intensita * (i === 0 ? 1 : 0.5);
+      });
+    });
+  });
+  return fatica;
+}
+
+const SOGLIA_FATICA = 1.6; // sopra questa soglia il muscolo è considerato carico
+
+/* ------------------------------------------------------------
+   Scelta degli esercizi: ogni candidato riceve un punteggio.
+   Conta se è un fondamentale, da quanto non lo fai, e quanto
+   sono affaticati i muscoli che coinvolge.
+   ------------------------------------------------------------ */
+function punteggioEsercizio(ex, ctx) {
+  let p = 0;
+  if (ex.base) p += 40;
+  if (ex.exp && ctx.obiettivo === "combattimento") p += 12;
+
+  // varietà: più tempo è passato, più sale il punteggio
+  const giorni = ctx.ultimoUso[ex.nome.toLowerCase()];
+  p += giorni == null ? 30 : Math.min(30, giorni * 5);
+
+  // penalità per muscoli già caricati di recente
+  let pen = 0;
+  ex.muscoli.forEach((m, i) => {
+    pen += (ctx.fatica[m] || 0) * (i === 0 ? 1 : 0.5);
+  });
+  p -= Math.min(45, pen * 12);
+
+  p += Math.random() * 8; // pizzico di casualità: due generazioni non identiche
+  return p;
+}
+
+/* Un esercizio "pesa" su un muscolo già affaticato? */
+function toccaMuscoliStanchi(ex, fatica) {
+  return ex.muscoli.some((m, i) => i === 0 && (fatica[m] || 0) >= SOGLIA_FATICA);
+}
+
+/* Sceglie N esercizi da un gruppo del catalogo.
+   Regola anti-sovrapposizione: al massimo MAX_STANCHI esercizi
+   della seduta possono insistere su muscoli già affaticati. */
+const MAX_STANCHI = 1;
+
+function scegliDaGruppo(ambito, gruppo, quanti, ctx) {
+  const lista = gruppoCatalogo(ambito, gruppo).filter(
+    (e) => !ctx.usati.has(e.nome.toLowerCase())
+  );
+  if (!lista.length) return [];
+
+  // i fondamentali entrano sempre
+  const scelti = lista.filter((e) => e.base).slice(0, quanti);
+  scelti.forEach((e) => ctx.usati.add(e.nome.toLowerCase()));
+
+  const restanti = lista
+    .filter((e) => !ctx.usati.has(e.nome.toLowerCase()))
+    .map((e) => ({ e, p: punteggioEsercizio(e, ctx) }))
+    .sort((a, b) => b.p - a.p);
+
+  // primo passaggio: rispetta il limite sui muscoli stanchi
+  for (const { e } of restanti) {
+    if (scelti.length >= quanti) break;
+    if (toccaMuscoliStanchi(e, ctx.fatica) && ctx.stanchiUsati >= MAX_STANCHI) continue;
+    scelti.push(e);
+    ctx.usati.add(e.nome.toLowerCase());
+    if (toccaMuscoliStanchi(e, ctx.fatica)) ctx.stanchiUsati++;
+  }
+  // secondo passaggio: se non bastano, si allenta il vincolo
+  for (const { e } of restanti) {
+    if (scelti.length >= quanti) break;
+    if (ctx.usati.has(e.nome.toLowerCase())) continue;
+    scelti.push(e);
+    ctx.usati.add(e.nome.toLowerCase());
+  }
+  return scelti;
+}
+
+/* Contesto di selezione condiviso da tutti i gruppi della seduta */
+function contestoSelezione(workouts, profile) {
+  return {
+    ultimoUso: ultimoUsoEsercizi(workouts),
+    fatica: caricoMuscolare(workouts),
+    obiettivo: profile ? profile.obiettivo : null,
+    usati: new Set(),
+    stanchiUsati: 0,
+  };
+}
+
+/* ------------------ Combinazioni e schemi al sacco ------------------ */
+
+/* Sceglie combinazioni evitando quelle usate nelle ultime sedute */
+function scegliCombinazioni(workouts, quanteSacco, quantePad) {
+  const recenti = new Set();
+  piuRecenti(workouts)
+    .filter((w) => w.type === "muaythai")
+    .slice(0, 3)
+    .forEach((w) =>
+      (w.fasi?.sacco?.esercizi || []).forEach((e) => recenti.add((e.det || "").trim()))
+    );
+
+  const pesca = (lista, quante) => {
+    const fresche = lista.filter((c) => !recenti.has(c));
+    const pool = fresche.length >= quante ? fresche : lista;
+    const copia = [...pool];
+    const out = [];
+    while (out.length < quante && copia.length)
+      out.push(copia.splice(Math.floor(Math.random() * copia.length), 1)[0]);
+    return out;
+  };
+
+  return {
+    sacco: pesca(COMBINAZIONI.sacco, quanteSacco),
+    pad: pesca(COMBINAZIONI.pad, quantePad),
+  };
+}
+
+/* Ruota gli schemi: propone quello meno usato di recente */
+function scegliSchemaSacco(workouts) {
+  const usati = piuRecenti(workouts)
+    .filter((w) => w.type === "muaythai" && w.schemaId)
+    .slice(0, 4)
+    .map((w) => w.schemaId);
+  const liberi = SCHEMI_SACCO.filter((s) => !usati.includes(s.id));
+  const pool = liberi.length ? liberi : SCHEMI_SACCO;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+/* ------------------ Generazione della seduta ------------------ */
+
+/* Il volume del circuito/serie segue la direzione del contesto */
+function adattaDaCatalogo(ex, ctx, workouts) {
+  const prog = ex.carico ? "carico" : /sec|min/.test(ex.det) ? "serie" : "rip";
+  return adattaEsercizio({ nome: ex.nome, det: ex.det, prog }, ctx, workouts);
+}
+
+function generaSeduta(type, focus, workouts, profile) {
+  workouts = workouts || [];
   const sess = SESSIONS[type][focus];
   const ctx = contestoAllenamento(workouts, type, focus);
-  return {
+
+  // ---- Corsa: sedute a schema fisso ----
+  if (type === "corsa") {
+    return {
+      type,
+      focus,
+      label: sess.label,
+      riscaldamento: WARMUPS[type].map((e) => ({ nome: e.nome, det: e.det })),
+      allenamento: sess.esercizi.map((e) => adattaEsercizio(e, ctx, workouts)),
+      defaticamento: COOLDOWNS[type].map((e) => ({ nome: e.nome, det: e.det })),
+      minuti: { riscaldamento: 10, allenamento: sess.durata, defaticamento: 10 },
+      durata: sess.durata,
+      contesto: ctx,
+    };
+  }
+
+  // ---- Muay Thai e sala pesi: esercizi scelti dal catalogo ----
+  const sel = contestoSelezione(workouts, profile);
+  const ambito = type === "pesi" ? "palestra" : "muaythai";
+
+  const prendi = (gruppi) =>
+    gruppi.flatMap(([gruppo, n]) => scegliDaGruppo(ambito, gruppo, n, sel));
+
+  const seduta = {
     type,
     focus,
     label: sess.label,
     riscaldamento: WARMUPS[type].map((e) => ({ nome: e.nome, det: e.det })),
-    allenamento: sess.esercizi.map((e) => adattaEsercizio(e, ctx, workouts)),
     defaticamento: COOLDOWNS[type].map((e) => ({ nome: e.nome, det: e.det })),
-    durata: sess.durata,
+    minuti: Object.assign({}, sess.minuti),
+    durata: sess.minuti.allenamento,
     contesto: ctx,
+    faticaRilevata: muscoliStanchi(sel.fatica),
   };
+
+  if (type === "pesi") {
+    seduta.allenamento = prendi(sess.gruppi).map((e) => adattaDaCatalogo(e, ctx, workouts));
+    return seduta;
+  }
+
+  // Muay Thai: parte centrale a circuito o a esercizi separati, alternate
+  const ultimaMT = piuRecenti(workouts).find((w) => w.type === "muaythai");
+  const ultimaEraCircuito = !!(ultimaMT?.fasi?.allenamento?.esercizi || []).some(
+    (e) => e.tipo === "circuito"
+  );
+
+  if (ultimaEraCircuito) {
+    seduta.allenamento = prendi(sess.gruppi.concat(sess.extraSeparati)).map((e) =>
+      adattaDaCatalogo(e, ctx, workouts)
+    );
+  } else {
+    const scelti = prendi(sess.gruppi);
+    const giri = ctx.dir > 0 ? 4 : 3;
+    seduta.allenamento = [
+      {
+        tipo: "circuito",
+        nome: "Circuito a corpo libero",
+        giri,
+        recEsVal: 15,
+        recEsUnit: "sec",
+        recGiriVal: 60,
+        recGiriUnit: "sec",
+        esercizi: scelti.map((e) => Object.assign({ nome: e.nome }, detACircuito(e.det))),
+      },
+    ];
+  }
+
+  // parte al sacco / pad
+  const schema = scegliSchemaSacco(workouts);
+  const combo = scegliCombinazioni(workouts, 2, 1);
+  seduta.schema = schema;
+  seduta.sacco = [
+    { nome: schema.nome, det: schema.det },
+    ...combo.sacco.map((c) => ({ nome: "Combinazione al sacco", det: c })),
+    ...combo.pad.map((c) => ({ nome: "Combinazione ai pad", det: c })),
+  ];
+  return seduta;
+}
+
+/* Elenco leggibile dei muscoli attualmente carichi (per spiegare le scelte) */
+const MUSCOLI_LABEL = {
+  petto: "petto", spalleAnt: "spalle", spalleLat: "spalle", spallePost: "spalle",
+  tricipiti: "tricipiti", bicipiti: "bicipiti", avambracci: "avambracci",
+  dorsali: "schiena", trapezi: "trapezi", lombari: "lombari",
+  addome: "addome", obliqui: "obliqui", glutei: "glutei",
+  quadricipiti: "quadricipiti", femorali: "femorali", adduttori: "adduttori",
+  polpacci: "polpacci", collo: "collo", cardio: "fiato",
+};
+
+function muscoliStanchi(fatica) {
+  const nomi = Object.entries(fatica)
+    .filter(([, v]) => v >= SOGLIA_FATICA)
+    .sort((a, b) => b[1] - a[1])
+    .map(([m]) => MUSCOLI_LABEL[m] || m);
+  return [...new Set(nomi)];
 }
 
 /* Piano settimanale in base all'obiettivo e ai giorni disponibili,
@@ -460,30 +691,33 @@ function generaSeduta(type, focus, workouts) {
 /* Con 5 allenamenti a settimana si usa lo schema fisso
    2 sala pesi + 2 Muay Thai + 1 corsa. Quali sedute finiscano
    nelle caselle lo decide comunque l'obiettivo scelto. */
-function schemaFisso(obiettivo) {
-  const pref = GOAL_PLANS[obiettivo];
-  const scegli = (type, quante) => {
-    const out = [];
-    const aggiungi = (slot) => {
-      if (out.length < quante && !out.some((s) => s.focus === slot.focus)) out.push(slot);
-    };
-    pref.filter((s) => s.type === type).forEach(aggiungi);
-    Object.keys(SESSIONS[type]).forEach((focus) => aggiungi({ type, focus }));
-    return out;
-  };
-  const pesi = scegli("pesi", 2);
-  const mt = scegli("muaythai", 2);
-  const corsa = scegli("corsa", 1);
-  return [mt[0], pesi[0], mt[1], pesi[1], corsa[0]];
+function schemaFisso(obiettivo, workouts) {
+  // i due slot di palestra ruotano: prima gli split lasciati indietro
+  const splitPesi = Object.keys(SESSIONS.pesi)
+    .map((focus) => {
+      const ultima = piuRecenti(workouts || []).find(
+        (w) => w.type === "pesi" && w.focus === focus
+      );
+      return { focus, giorni: ultima ? giorniDa(ultima.date) : 999 };
+    })
+    .sort((a, b) => b.giorni - a.giorni)
+    .slice(0, 2)
+    .map((s) => ({ type: "pesi", focus: s.focus }));
+
+  const corsaPref = GOAL_PLANS[obiettivo].find((s) => s.type === "corsa");
+  const corsa = corsaPref || { type: "corsa", focus: "lento" };
+  const mt = { type: "muaythai", focus: "completo" };
+
+  return [mt, splitPesi[0], Object.assign({}, mt), splitPesi[1], corsa];
 }
 
-function slotsSettimana(profile) {
-  if (+profile.giorni === 5) return schemaFisso(profile.obiettivo);
+function slotsSettimana(profile, workouts) {
+  if (+profile.giorni === 5) return schemaFisso(profile.obiettivo, workouts);
   return GOAL_PLANS[profile.obiettivo].slice(0, profile.giorni);
 }
 
 function pianoSettimanale(profile, workouts) {
-  const plan = slotsSettimana(profile);
+  const plan = slotsSettimana(profile, workouts);
   const settimana = ultimi7Giorni(workouts);
   const usati = new Set();
   return plan.map((slot) => {
@@ -505,7 +739,7 @@ function ultimi7Giorni(workouts) {
 function prossimoConsigliato(profile, workouts) {
   const plan = pianoSettimanale(profile, workouts);
   const slot = plan.find((s) => !s.done) || plan[0];
-  return generaSeduta(slot.type, slot.focus, workouts);
+  return generaSeduta(slot.type, slot.focus, workouts, profile);
 }
 
 /* ============================================================
@@ -538,17 +772,23 @@ function metEffettivo(type, focus, rpe, passoSecKm) {
   return base * fattore;
 }
 
-function stimaCalorie(type, focus, rpe, minRisc, minAll, minDef, profile, passoSecKm) {
-  const rmr = rmrPerMinuto(profile);
-  const met = metEffettivo(type, focus, rpe, passoSecKm);
+/* opzioni: { type, focus, rpe, minuti: {riscaldamento, allenamento, sacco, defaticamento},
+              profile, passo } */
+function stimaCalorie(opzioni) {
+  const o = opzioni || {};
+  const min = o.minuti || {};
+  const rmr = rmrPerMinuto(o.profile || {});
+  const met = metEffettivo(o.type, o.focus, o.rpe, o.passo);
   // consumo netto: (MET - 1) perché 1 MET è quello che si spende comunque a riposo
   const kcal =
-    (MET_RISCALDAMENTO - 1) * rmr * (minRisc || 0) +
-    (met - 1) * rmr * (minAll || 0) +
-    (MET_DEFATICAMENTO - 1) * rmr * (minDef || 0);
+    (MET_RISCALDAMENTO - 1) * rmr * (min.riscaldamento || 0) +
+    (met - 1) * rmr * (min.allenamento || 0) +
+    (MET_SACCO - 1) * rmr * (min.sacco || 0) +
+    (MET_DEFATICAMENTO - 1) * rmr * (min.defaticamento || 0);
 
-  const intensa = (rpe || 7) >= 8 || FOCUS_INTENSI.includes(focus);
-  const epoc = intensa ? 1 + Math.min(0.09, 0.02 + Math.max(0, (rpe || 7) - 6) * 0.02) : 1;
+  const rpe = o.rpe || 7;
+  const intensa = rpe >= 8 || FOCUS_INTENSI.includes(o.focus) || (min.sacco || 0) > 0;
+  const epoc = intensa ? 1 + Math.min(0.09, 0.02 + Math.max(0, rpe - 6) * 0.02) : 1;
 
   return Math.max(0, Math.round(kcal * epoc));
 }

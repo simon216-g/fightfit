@@ -85,14 +85,29 @@ function renderHome() {
   const sug = prossimoConsigliato(profile, workouts);
   const info = TYPE_INFO[sug.type];
   const msg = messaggioContesto(sug.contesto);
+  const totMin = Object.values(sug.minuti || {}).reduce((s, m) => s + m, 0);
+  const stanchi = sug.faticaRilevata || [];
+  const msgFatica = stanchi.length
+    ? `💡 Tengo conto che hai già caricato ${stanchi.slice(0, 3).join(", ")}.`
+    : "";
+
+  // in elenco mostro anche il contenuto del circuito e le combinazioni
+  const anteprima = [];
+  (sug.allenamento || []).forEach((e) => {
+    if (e.tipo === "circuito")
+      anteprima.push(`🔁 ${e.nome}: ${e.esercizi.map((s) => s.nome).join(", ")}`);
+    else anteprima.push(`${e.nome} — ${e.det}`);
+  });
+  (sug.sacco || []).forEach((e) => anteprima.push(`${e.nome} — ${e.det}`));
+
   $("#suggestion-card").innerHTML = `
     <div class="hero-tag">Allenamento consigliato oggi</div>
     <h2>${info.emoji} ${info.nome} — ${sug.label}</h2>
-    <div class="hero-sub">Obiettivo: ${GOAL_LABELS[profile.obiettivo]} · ~${sug.durata + 20} min totali${
+    <div class="hero-sub">Obiettivo: ${GOAL_LABELS[profile.obiettivo]} · ~${totMin} min totali${
       msg ? "<br>" + msg : ""
-    }</div>
-    <ul>${sug.allenamento.slice(0, 4).map((e) => `<li>${e.nome} — ${e.det}</li>`).join("")}
-    ${sug.allenamento.length > 4 ? "<li>…e altro</li>" : ""}</ul>
+    }${msgFatica ? "<br>" + msgFatica : ""}</div>
+    <ul>${anteprima.slice(0, 4).map((t) => `<li>${escapeAttr(t)}</li>`).join("")}
+    ${anteprima.length > 4 ? "<li>…e altro</li>" : ""}</ul>
     <button class="btn primary full" id="btn-start-sug">▶️ Inizia questo allenamento</button>
   `;
   $("#btn-start-sug").addEventListener("click", () => {
@@ -131,17 +146,35 @@ $$(".type-btn").forEach((btn) =>
     btn.classList.add("active");
     currentType = btn.dataset.type;
     popolaFocus();
-    aggiornaKcal();
+    renderSacco();
     renderCarichi();
     renderCorsa();
+    aggiornaKcal();
   })
 );
 
+/* Fasi della seduta: il sacco esiste solo per la Muay Thai */
+const FASI = ["riscaldamento", "allenamento", "sacco", "defaticamento"];
+
+function fasiAttive() {
+  return currentType === "muaythai" ? FASI : FASI.filter((f) => f !== "sacco");
+}
+
 function popolaFocus() {
   const sel = $("#w-focus");
-  sel.innerHTML = Object.entries(SESSIONS[currentType])
-    .map(([k, v]) => `<option value="${k}">${v.label}</option>`)
-    .join("");
+  const voci = Object.entries(SESSIONS[currentType]);
+  sel.innerHTML = voci.map(([k, v]) => `<option value="${k}">${v.label}</option>`).join("");
+  // con una sola voce il menù è inutile: la Muay Thai ha uno schema unico
+  const unica = voci.length === 1;
+  sel.hidden = unica;
+  $("#label-focus").hidden = unica;
+}
+
+/* Mostra o nasconde la fase sacco in base al tipo di allenamento */
+function renderSacco() {
+  const mt = currentType === "muaythai";
+  $("#fase-sacco").hidden = !mt;
+  if (!mt) $("#schema-box").hidden = true;
 }
 
 function exRow(phase, nome = "", det = "") {
@@ -173,7 +206,13 @@ function renderCarichi() {
     return;
   }
 
-  const esercizi = leggiFase("allenamento").filter((e) => e.tipo !== "circuito");
+  // solo gli esercizi dove un carico ha senso (il catalogo lo sa;
+  // i nomi scritti a mano si mostrano comunque)
+  const esercizi = leggiFase("allenamento").filter((e) => {
+    if (e.tipo === "circuito") return false;
+    const cat = trovaEsercizio(e.nome);
+    return !cat || cat.carico;
+  });
 
   // visibile fin da subito, così si sa che c'è: si riempie da sola
   card.hidden = false;
@@ -205,6 +244,60 @@ function renderCarichi() {
 }
 
 $("#list-allenamento").addEventListener("input", renderCarichi);
+
+/* ------------------ Schema al sacco ------------------
+   Lo schema proposto porta con sé il proprio timer: un tocco e parte. */
+let schemaCorrente = null;
+
+function mostraSchema(schema) {
+  schemaCorrente = schema || null;
+  const box = $("#schema-box");
+  if (!schema) {
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  $("#schema-nome").textContent = schema.nome;
+  $("#schema-det").textContent = schema.det;
+  $("#schema-note").textContent = schema.note || "";
+}
+
+$("#btn-avvia-schema").addEventListener("click", () => {
+  if (!schemaCorrente) return;
+  avviaSchema(schemaCorrente);
+});
+
+function avviaSchema(schema) {
+  const t = schema.timer;
+  if (t.tipo === "circuito") {
+    avviaCircuito({
+      nome: schema.nome,
+      giri: t.giri,
+      recEs: t.recEs,
+      recGiri: t.recGiri,
+      esercizi: t.esercizi,
+    });
+    return;
+  }
+  // timer a round: imposto i campi e avvio
+  const imposta = (id, val) => {
+    const el = $("#" + id);
+    el.value = val;
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  clearInterval(rd.interval);
+  rd = { running: false, interval: null, phase: "work", round: 1, remaining: 0 };
+  imposta("r-rounds", t.rounds);
+  imposta("r-work-unit", "sec");
+  imposta("r-work", t.work);
+  imposta("r-rest-unit", "sec");
+  imposta("r-rest", t.rest);
+  showView("timer");
+  $$(".timer-tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.mode === "round"));
+  $$(".timer-panel").forEach((p) => p.classList.toggle("active", p.id === "timer-round"));
+  $("#round-reset").click();
+  $("#round-start").click();
+}
 
 /* ------------------ Distanza e tempo (solo corsa) ------------------ */
 function datiCorsa() {
@@ -387,10 +480,26 @@ function leggiFase(phase) {
 }
 
 $("#btn-genera").addEventListener("click", () => {
-  const seduta = generaSeduta(currentType, $("#w-focus").value, state.workouts);
+  const seduta = generaSeduta(currentType, $("#w-focus").value, state.workouts, state.profile);
   precompilaForm(seduta);
-  toast("Seduta generata in base ai tuoi progressi ✨");
+  const stanchi = seduta.faticaRilevata || [];
+  toast(
+    stanchi.length
+      ? "Seduta generata — alleggerita su " + stanchi.slice(0, 2).join(" e ")
+      : "Seduta generata in base ai tuoi progressi ✨"
+  );
 });
+
+/* Riempie una lista di fase, gestendo sia gli esercizi singoli
+   sia i blocchi circuito */
+function riempiLista(phase, voci) {
+  const lista = $("#list-" + phase);
+  lista.innerHTML = "";
+  (voci || []).forEach((e) => {
+    if (e.tipo === "circuito") lista.appendChild(circuitoBlock(e));
+    else exRow(phase, e.nome, e.det);
+  });
+}
 
 function precompilaForm(seduta) {
   // tipo
@@ -400,17 +509,25 @@ function precompilaForm(seduta) {
   );
   popolaFocus();
   $("#w-focus").value = seduta.focus;
+  renderSacco();
+
   // fasi
   circuitiMinLast = 0;
-  ["riscaldamento", "allenamento", "defaticamento"].forEach((phase) => {
-    $("#list-" + phase).innerHTML = "";
-    seduta[phase].forEach((e) => exRow(phase, e.nome, e.det));
+  fasiAttive().forEach((phase) => {
+    riempiLista(phase, seduta[phase]);
+    const min = (seduta.minuti && seduta.minuti[phase]) || 0;
+    if (min) $("#min-" + phase).value = min;
   });
-  $("#min-allenamento").value = seduta.durata;
+  // i minuti del circuito appena generato sono già dentro la durata proposta
+  circuitiMinLast = leggiFase("allenamento")
+    .filter((x) => x.tipo === "circuito")
+    .reduce((s, c) => s + stimaMinutiCircuito(c), 0);
+
+  mostraSchema(seduta.schema || null);
 
   // carichi consigliati: restano solo come suggerimento nei campi vuoti
   kgSuggeriti = {};
-  seduta.allenamento.forEach((e) => {
+  (seduta.allenamento || []).forEach((e) => {
     if (e.kgSuggerito) kgSuggeriti[e.nome.toLowerCase()] = e.kgSuggerito;
   });
   $("#carichi-list").innerHTML = "";
@@ -432,31 +549,34 @@ $("#w-rpe").addEventListener("input", () => {
 });
 
 /* Calorie in tempo reale */
-["min-riscaldamento", "min-allenamento", "min-defaticamento"].forEach((id) =>
+["min-riscaldamento", "min-allenamento", "min-sacco", "min-defaticamento"].forEach((id) =>
   $("#" + id).addEventListener("input", aggiornaKcal)
 );
 $("#w-focus").addEventListener("change", aggiornaKcal);
 
+/* Minuti attualmente impostati, fase per fase */
+function minutiForm() {
+  const min = {};
+  fasiAttive().forEach((f) => (min[f] = +$("#min-" + f).value || 0));
+  return min;
+}
+
 function aggiornaKcal() {
-  $("#kcal-preview").textContent = stimaCalorie(
-    currentType,
-    $("#w-focus").value,
-    +$("#w-rpe").value,
-    +$("#min-riscaldamento").value || 0,
-    +$("#min-allenamento").value || 0,
-    +$("#min-defaticamento").value || 0,
-    state.profile,
-    currentType === "corsa" ? datiCorsa().passo : 0
-  );
+  $("#kcal-preview").textContent = stimaCalorie({
+    type: currentType,
+    focus: $("#w-focus").value,
+    rpe: +$("#w-rpe").value,
+    minuti: minutiForm(),
+    profile: state.profile,
+    passo: currentType === "corsa" ? datiCorsa().passo : 0,
+  });
 }
 
 /* Salvataggio */
 $("#btn-salva").addEventListener("click", () => {
   const leggi = leggiFase;
 
-  const riscMin = +$("#min-riscaldamento").value || 0;
-  const allMin = +$("#min-allenamento").value || 0;
-  const defMin = +$("#min-defaticamento").value || 0;
+  const minuti = minutiForm();
   const allenamento = leggi("allenamento");
 
   if (!allenamento.length) {
@@ -479,30 +599,31 @@ $("#btn-salva").addEventListener("click", () => {
 
   const corsa = currentType === "corsa" ? datiCorsa() : null;
 
+  const fasi = {};
+  fasiAttive().forEach((f) => {
+    fasi[f] = { min: minuti[f] || 0, esercizi: f === "allenamento" ? allenamento : leggi(f) };
+  });
+
   const w = {
     id: editingId || Date.now(),
     date: $("#w-date").value || new Date().toISOString().slice(0, 10),
     type: currentType,
     focus: $("#w-focus").value,
-    fasi: {
-      riscaldamento: { min: riscMin, esercizi: leggi("riscaldamento") },
-      allenamento: { min: allMin, esercizi: allenamento },
-      defaticamento: { min: defMin, esercizi: leggi("defaticamento") },
-    },
-    durataTotale: riscMin + allMin + defMin,
+    fasi,
+    durataTotale: Object.values(minuti).reduce((s, m) => s + m, 0),
     rpe: +$("#w-rpe").value,
     note: $("#w-note").value.trim(),
-    kcal: stimaCalorie(
-      currentType,
-      $("#w-focus").value,
-      +$("#w-rpe").value,
-      riscMin,
-      allMin,
-      defMin,
-      state.profile,
-      corsa ? corsa.passo : 0
-    ),
+    kcal: stimaCalorie({
+      type: currentType,
+      focus: $("#w-focus").value,
+      rpe: +$("#w-rpe").value,
+      minuti,
+      profile: state.profile,
+      passo: corsa ? corsa.passo : 0,
+    }),
   };
+
+  if (currentType === "muaythai" && schemaCorrente) w.schemaId = schemaCorrente.id;
 
   if (corsa && corsa.km > 0 && corsa.sec > 0) {
     w.km = corsa.km;
@@ -542,16 +663,14 @@ function caricaPerModifica(w) {
   popolaFocus();
   $("#w-focus").value = w.focus;
 
+  renderSacco();
   kgSuggeriti = {};
-  ["riscaldamento", "allenamento", "defaticamento"].forEach((phase) => {
-    const lista = $("#list-" + phase);
-    lista.innerHTML = "";
-    (w.fasi[phase].esercizi || []).forEach((e) => {
-      if (e.tipo === "circuito") lista.appendChild(circuitoBlock(e));
-      else exRow(phase, e.nome, e.det);
-    });
-    $("#min-" + phase).value = w.fasi[phase].min;
+  fasiAttive().forEach((phase) => {
+    const fase = w.fasi[phase] || { min: 0, esercizi: [] };
+    riempiLista(phase, fase.esercizi);
+    $("#min-" + phase).value = fase.min || 0;
   });
+  mostraSchema(SCHEMI_SACCO.find((s) => s.id === w.schemaId) || null);
   // i minuti salvati comprendono già i circuiti: allineo il riferimento
   circuitiMinLast = leggiFase("allenamento")
     .filter((x) => x.tipo === "circuito")
@@ -594,9 +713,9 @@ function resetForm() {
   $("#carichi-card").hidden = true;
   ["run-km", "run-min", "run-sec"].forEach((id) => ($("#" + id).value = ""));
   renderCorsa();
-  ["riscaldamento", "allenamento", "defaticamento"].forEach(
-    (p) => ($("#list-" + p).innerHTML = "")
-  );
+  renderSacco();
+  mostraSchema(null);
+  FASI.forEach((p) => ($("#list-" + p).innerHTML = ""));
   $("#w-note").value = "";
   $("#w-rpe").value = 7;
   $("#rpe-val").textContent = 7;
@@ -1124,7 +1243,7 @@ function renderHistory() {
   list.innerHTML = ws
     .map((w) => {
       const i = TYPE_INFO[w.type];
-      const focusLabel = SESSIONS[w.type][w.focus] ? SESSIONS[w.type][w.focus].label : (w.focus || "");
+      const focusLabel = etichettaFocus(w.type, w.focus);
       const voce = (e) => {
         if (e.tipo !== "circuito")
           return `<li>• ${escapeAttr(e.nome)}${e.det ? " — " + escapeAttr(e.det) : ""}${
@@ -1141,7 +1260,7 @@ function renderHistory() {
         return `<li>🔁 <strong>${escapeAttr(e.nome)}</strong> — ${e.giri} giri</li>${sub}`;
       };
       const fase = (nome, f) =>
-        f.esercizi.length
+        f && f.esercizi && f.esercizi.length
           ? `<h4>${nome} (${f.min} min)</h4><ul>${f.esercizi.map(voce).join("")}</ul>`
           : "";
       return `<div class="card h-item" data-id="${w.id}">
@@ -1156,6 +1275,7 @@ function renderHistory() {
         <div class="h-body">
           ${fase("🔥 Riscaldamento", w.fasi.riscaldamento)}
           ${fase("💪 Allenamento", w.fasi.allenamento)}
+          ${fase("🥊 Sacco / Pad", w.fasi.sacco)}
           ${fase("🧘 Defaticamento", w.fasi.defaticamento)}
           ${
             w.km && w.tempoSec
@@ -1287,6 +1407,7 @@ $("#btn-reset").addEventListener("click", () => {
    Avvio
    ============================================================ */
 popolaFocus();
+renderSacco();
 resetForm();
 renderProfile();
 renderHome();
