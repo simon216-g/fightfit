@@ -2,7 +2,7 @@
    Strategia "prima la rete": se c'è connessione si prende sempre la
    versione aggiornata (niente doppia apertura per vedere le novità),
    altrimenti si usa la copia in cache. */
-const CACHE = "fightfit-v5";
+const CACHE = "fightfit-v6";
 const ASSETS = [
   "./",
   "./index.html",

@@ -467,7 +467,7 @@ const SOGLIA_FATICA = 1.6; // sopra questa soglia il muscolo è considerato cari
 function punteggioEsercizio(ex, ctx) {
   let p = 0;
   if (ex.base) p += 40;
-  if (ex.exp && ctx.obiettivo === "combattimento") p += 12;
+  if (ex.exp && ctx.obiettivo === "combattimento") p += 8;
 
   // varietà: più tempo è passato, più sale il punteggio
   const giorni = ctx.ultimoUso[ex.nome.toLowerCase()];
@@ -480,8 +480,22 @@ function punteggioEsercizio(ex, ctx) {
   });
   p -= Math.min(45, pen * 12);
 
-  p += Math.random() * 8; // pizzico di casualità: due generazioni non identiche
   return p;
+}
+
+/* Estrazione pesata sul punteggio: il migliore è il più probabile,
+   non l'unico possibile. Senza questo la seduta sarebbe sempre identica
+   e gli esercizi meno "premiati" non uscirebbero mai. */
+function pescaPesato(candidati) {
+  const pesi = candidati.map((c) => Math.exp(Math.max(-40, c.p) / 8));
+  const tot = pesi.reduce((a, b) => a + b, 0);
+  if (!tot || !isFinite(tot)) return candidati[0];
+  let r = Math.random() * tot;
+  for (let i = 0; i < candidati.length; i++) {
+    r -= pesi[i];
+    if (r <= 0) return candidati[i];
+  }
+  return candidati[candidati.length - 1];
 }
 
 /* Un esercizio "pesa" su un muscolo già affaticato? */
@@ -504,25 +518,20 @@ function scegliDaGruppo(ambito, gruppo, quanti, ctx) {
   const scelti = lista.filter((e) => e.base).slice(0, quanti);
   scelti.forEach((e) => ctx.usati.add(e.nome.toLowerCase()));
 
-  const restanti = lista
+  let pool = lista
     .filter((e) => !ctx.usati.has(e.nome.toLowerCase()))
-    .map((e) => ({ e, p: punteggioEsercizio(e, ctx) }))
-    .sort((a, b) => b.p - a.p);
+    .map((e) => ({ e, p: punteggioEsercizio(e, ctx) }));
 
-  // primo passaggio: rispetta il limite sui muscoli stanchi
-  for (const { e } of restanti) {
-    if (scelti.length >= quanti) break;
-    if (toccaMuscoliStanchi(e, ctx.fatica) && ctx.stanchiUsati >= MAX_STANCHI) continue;
-    scelti.push(e);
-    ctx.usati.add(e.nome.toLowerCase());
-    if (toccaMuscoliStanchi(e, ctx.fatica)) ctx.stanchiUsati++;
-  }
-  // secondo passaggio: se non bastano, si allenta il vincolo
-  for (const { e } of restanti) {
-    if (scelti.length >= quanti) break;
-    if (ctx.usati.has(e.nome.toLowerCase())) continue;
-    scelti.push(e);
-    ctx.usati.add(e.nome.toLowerCase());
+  while (scelti.length < quanti && pool.length) {
+    // chi insiste su muscoli già carichi resta fuori finché c'è alternativa
+    const ammessi = pool.filter(
+      (c) => !(toccaMuscoliStanchi(c.e, ctx.fatica) && ctx.stanchiUsati >= MAX_STANCHI)
+    );
+    const scelta = pescaPesato(ammessi.length ? ammessi : pool);
+    scelti.push(scelta.e);
+    ctx.usati.add(scelta.e.nome.toLowerCase());
+    if (toccaMuscoliStanchi(scelta.e, ctx.fatica)) ctx.stanchiUsati++;
+    pool = pool.filter((c) => c !== scelta);
   }
   return scelti;
 }
